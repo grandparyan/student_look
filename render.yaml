@@ -1,0 +1,13 @@
+# 服務配置檔案
+services:
+  - type: web
+    # 服務名稱 (用於介面顯示)
+    name: 設備報修表單
+    # 環境設定為 Python
+    env: python
+    # 執行安裝依賴的指令
+    buildCommand: "pip install -r requirements.txt"
+    # 服務啟動指令 (使用 uvicorn 啟動 main.py 中的 Fastapi/Flask 應用程式)
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
+    # 設定為手動部署，不會在程式碼變更時自動重新部署
+    autoDeploy: false
