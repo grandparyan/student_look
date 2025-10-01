@@ -30,8 +30,8 @@
         /* 針對行動裝置優化表格邊界 */
         @media (max-width: 768px) {
              .hide-on-mobile {
-                display: none;
-            }
+                 display: none;
+             }
         }
     </style>
 </head>
@@ -45,7 +45,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.807 3.42 3.42 0 014.288 0 3.42 3.42 0 001.946.807M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <h1 class="text-3xl font-bold text-gray-900">報修紀錄追蹤與處理 (教師/管理員)</h1>
-            <p class="text-gray-500 mt-1">即時查看並更新報修狀態。</p>
+            <p class="text-gray-500 mt-1">即時查看並更新報修狀態與負責人。</p>
             <!-- 連結已更新至 student.html -->
             <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="./student.html">點此前往學生報修表單</a></p>
         </div>
@@ -69,7 +69,7 @@
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師/負責人</th> <!-- 標題已更新 -->
                         <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">狀態</th>
                         <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">操作</th>
                     </tr>
@@ -85,7 +85,7 @@
         // 設定 API 終端點 (假設與您的 Python/Render 服務一致)
         const API_URL = ""; 
         const VIEW_ENDPOINT = '/view_reports';
-        const UPDATE_ENDPOINT = '/update_status';
+        const UPDATE_ENDPOINT = '/update_status'; // 此 API 預期同時接收 newStatus 和 newTeacher
         
         const tableBody = document.getElementById('reports-table-body');
         const loading = document.getElementById('loading');
@@ -151,21 +151,23 @@
                 const descriptionCell = row.insertCell();
                 descriptionCell.innerHTML = `<div class="description-cell text-sm text-gray-600">${report['問題詳細描述']}</div>`;
                 
-                // 5. 協辦老師 (隱藏於手機版)
+                // 5. 協辦老師/負責人 (現在是可編輯輸入框)
                 const teacherCell = row.insertCell();
-                teacherCell.textContent = report['協辦老師'];
-                teacherCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'text-gray-500', 'hide-on-mobile');
+                const teacherInputId = `teacher-input-${report.sheetRow}`;
+                teacherCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'hide-on-mobile');
+                // 預設值為 '無指定' 時顯示空字串，讓使用者易於輸入
+                const teacherValue = report['協辦老師'] === '無指定' ? '' : report['協辦老師'];
+                teacherCell.innerHTML = `
+                    <input type="text" id="${teacherInputId}" 
+                           value="${teacherValue}"
+                           placeholder="輸入負責人姓名"
+                           class="w-full px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
+                    >`;
 
-                // 6. 狀態顯示
+                // 6. 狀態顯示 (下拉選單)
                 const statusCell = row.insertCell();
                 statusCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-center');
-                statusCell.innerHTML = `<span class="status-badge ${getStatusClass(report['狀態'])}">${report['狀態']}</span>`;
 
-                // 7. 操作欄位 (下拉選單與按鈕)
-                const actionCell = row.insertCell();
-                actionCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'font-medium', 'flex', 'flex-col', 'md:flex-row', 'items-center', 'space-y-1', 'md:space-y-0', 'md:space-x-2');
-
-                // 下拉選單
                 const selectId = `status-select-${report.sheetRow}`;
                 let selectHtml = `<select id="${selectId}" class="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-indigo-500 focus:border-indigo-500">`;
                 STATUS_OPTIONS.forEach(opt => {
@@ -173,21 +175,30 @@
                     selectHtml += `<option value="${opt.value}" ${selected}>${opt.label}</option>`;
                 });
                 selectHtml += `</select>`;
-                actionCell.innerHTML += selectHtml;
+                statusCell.innerHTML = selectHtml;
+                // statusCell.innerHTML += `<span class="status-badge ${getStatusClass(report['狀態'])}">${report['狀態']}</span>`;
+
+                // 7. 操作欄位 (更新按鈕)
+                const actionCell = row.insertCell();
+                actionCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'font-medium', 'flex', 'flex-col', 'md:flex-row', 'items-center', 'space-y-1', 'md:space-y-0', 'md:space-x-2', 'justify-center');
 
                 // 更新按鈕
                 const button = document.createElement('button');
                 button.textContent = '更新';
                 button.classList.add('update-btn', 'py-1', 'px-3', 'border', 'border-transparent', 'rounded-lg', 'shadow-sm', 'text-xs', 'md:text-sm', 'font-medium', 'text-white', 'bg-indigo-600', 'hover:bg-indigo-700', 'focus:outline-none', 'focus:ring-2', 'focus:ring-offset-2', 'focus:ring-indigo-500', 'transition', 'duration-150', 'ease-in-out', 'w-full', 'md:w-auto');
-                button.dataset.row = report.sheetRow; // 儲存 Sheet 列號
-                button.onclick = () => handleUpdateStatus(button, report.sheetRow, selectId);
+                
+                // 綁定點擊事件，傳遞 selectId 和 teacherInputId
+                button.onclick = () => handleUpdateStatus(button, report.sheetRow, selectId, teacherInputId);
                 actionCell.appendChild(button);
             });
         }
 
         // 處理更新狀態的函式
-        async function handleUpdateStatus(button, sheetRow, selectId) {
+        async function handleUpdateStatus(button, sheetRow, selectId, teacherInputId) {
+            // 取得新的狀態值
             const newStatus = document.getElementById(selectId).value;
+            // 取得新的協辦老師/負責人值，如果為空則設為 '無指定'
+            const newTeacher = document.getElementById(teacherInputId).value.trim() || '無指定'; 
 
             // 鎖定按鈕
             button.disabled = true;
@@ -197,10 +208,11 @@
             try {
                 // 為了單獨預覽，如果沒有 API_URL，則模擬成功
                 if (API_URL === '') {
-                     await new Promise(resolve => setTimeout(resolve, 500)); 
-                     showMessage(`模擬更新成功：第 ${sheetRow} 列的狀態已成功更新為「${newStatus}」。`, true);
-                     await fetchReports();
-                     return;
+                    await new Promise(resolve => setTimeout(resolve, 500)); 
+                    showMessage(`模擬更新成功：第 ${sheetRow} 列的狀態已更新為「${newStatus}」，負責人設定為「${newTeacher}」。`, true);
+                    // 模擬更新後重新載入資料以反映變更 (這裡的模擬重新載入會保留舊的模擬資料)
+                    await fetchReports();
+                    return;
                 }
                 
                 const response = await fetch(API_URL + UPDATE_ENDPOINT, {
@@ -208,7 +220,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         sheetRow: sheetRow, 
-                        newStatus: newStatus 
+                        newStatus: newStatus,
+                        newTeacher: newTeacher // 傳送新的負責人姓名
                     })
                 });
 
