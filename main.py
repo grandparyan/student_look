@@ -12,11 +12,10 @@ logging.basicConfig(level=logging.INFO)
 
 # ----------------------------------------------------
 # 設定 Google Sheets 參數
-# 請確保您的服務帳號有此試算表的「編輯者」權限
-# 請注意：此處的 spreadsheet_id 仍沿用您提供的 ID
 spreadsheet_id = "1IHyA7aRxGJekm31KIbuORpg4-dVY8XTOEbU6p8vK3y4"
 WORKSHEET_NAME = "設備報修" 
-STATUS_COLUMN_INDEX = 5 # 狀態欄位在 Sheets 中的索引 (E 欄是第 5 欄)
+STATUS_COLUMN_INDEX = 5     # E 欄 (狀態)
+PERSON_IN_CHARGE_COLUMN_INDEX = 6 # G 欄 (負責人)
 
 # Google Sheets API 範圍
 scope = [
@@ -78,11 +77,29 @@ with app.app_context():
 # ----------------------------------------------------
 # 路由定義
 
-# 1. 根路由：用於顯示 HTML 報修表單 (學生填寫介面)
+# 1. 根路由：導向學生報修頁面
 @app.route('/')
-def home():
+def root_redirect():
+    """根路由：導向學生報修介面。"""
+    # 這裡可以回傳一個導覽頁面，或直接導向學生介面
+    return Response("""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>設備報修系統</title>
+        <meta http-equiv="refresh" content="0; url=/student.html">
+    </head>
+    <body>
+        <p>Redirecting to <a href="/student.html">Student Repair Form</a>...</p>
+    </body>
+    </html>
+    """, mimetype='text/html')
+
+# 2. 學生報修表單 HTML 內容
+@app.route('/student.html')
+def student_view():
     """回傳學生填寫的報修表單 HTML 內容。"""
-    # 保持您原有的 HTML 內容，此處省略以保持簡潔
+    # 保持您原有的 HTML 內容，並確保頁面連結正確
     html_content = """
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -108,7 +125,7 @@ def home():
             </svg>
             <h1 class="text-3xl font-bold text-gray-900">設備報修單 (學生填寫)</h1>
             <p class="text-gray-500 mt-1">請填寫詳細資訊，以便我們快速處理。</p>
-            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="/teacher">點此前往教師/管理員介面</a></p>
+            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="/teacher.html">點此前往教師/管理員介面</a></p>
         </div>
 
         <!-- 訊息顯示區塊 (取代 alert) -->
@@ -214,62 +231,10 @@ def home():
     return Response(html_content, mimetype='text/html')
 
 
-# 2. API 路由：用於接收表單提交的資料 (學生填寫)
-@app.route('/submit_report', methods=['POST'])
-def submit_data_api():
-    """接收來自網頁的 POST 請求，將 JSON 資料寫入 Google Sheets。"""
-    if not sheet:
-        if not initialize_gspread():
-            return jsonify({"status": "error", "message": "伺服器初始化失敗，無法連線至 Google Sheets。請檢查 log 訊息。"}), 500
-
-    try:
-        data = request.get_json()
-    except Exception:
-        logging.error("請求資料解析失敗：不是有效的 JSON 格式。")
-        return jsonify({"status": "error", "message": "請求必須是 JSON 格式。請檢查網頁前端的 Content-Type。"}), 400
-
-    if not data:
-        logging.error("請求資料為空。")
-        return jsonify({"status": "error", "message": "請求資料為空。"}), 400
-    
-    try:
-        # 從 JSON 資料中提取欄位
-        reporterName = data.get('reporterName', 'N/A')
-        deviceLocation = data.get('deviceLocation', 'N/A')
-        problemDescription = data.get('problemDescription', 'N/A')
-        
-        if not all([reporterName != 'N/A', deviceLocation != 'N/A', problemDescription != 'N/A']):
-            logging.error(f"缺少必要資料: {data}")
-            return jsonify({"status": "error", "message": "缺少必要的報修資料（如報修人、地點或描述）。"}), 400
-
-        # 獲取當前的 UTC 時間並轉換為台灣時區
-        taiwan_time = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
-        timestamp = taiwan_time.strftime("%Y-%m-%d %H:%M:%S")
-
-        # row 陣列包含 5 個元素：時間戳記、姓名、位置、描述、狀態
-        row = [
-            timestamp, 
-            str(reporterName),
-            str(deviceLocation),
-            str(problemDescription),
-            "待處理" # 預設狀態
-        ]
-        
-        # 將資料附加到工作表的最後一行
-        sheet.append_row(row)
-        
-        logging.info(f"資料成功寫入：{row}")
-        return jsonify({"status": "success", "message": "設備報修資料已成功送出！"}), 200
-        
-    except Exception as e:
-        logging.error(f"寫入 Google Sheets 時發生錯誤: {e}")
-        return jsonify({"status": "error", "message": f"提交失敗：{str(e)}，可能是 Sheets API 限制或連線問題。"}), 500
-
-
-# 3. 老師查看介面路由：回傳教師查看報修紀錄的 HTML 內容
-@app.route('/teacher')
+# 3. 教師追蹤介面 HTML 內容
+@app.route('/teacher.html')
 def teacher_view():
-    """回傳教師/管理員查看和更新報修狀態的介面 HTML。"""
+    """回傳教師/管理員查看和指派負責人的介面 HTML。"""
     html_content = f"""
 <!DOCTYPE html>
 <html lang="zh-TW">
@@ -295,8 +260,8 @@ def teacher_view():
         <!-- 標題區塊 -->
         <div class="text-center mb-8">
             <h1 class="text-3xl font-bold text-gray-900">報修紀錄追蹤與處理 (教師/管理員)</h1>
-            <p class="text-gray-500 mt-1">即時查看並更新報修狀態。</p>
-            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="/">點此前往學生報修介面</a></p>
+            <p class="text-gray-500 mt-1">即時查看報修紀錄並指派負責人。</p>
+            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="/student.html">點此前往學生報修介面</a></p>
         </div>
 
         <!-- 訊息顯示區塊 -->
@@ -318,7 +283,7 @@ def teacher_view():
                         <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
                         <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
                         <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
-                        <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider">狀態</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider">負責人</th> <!-- 新增負責人欄位 -->
                         <th class="px-6 py-3 text-center text-xs font-medium uppercase tracking-wider">操作</th>
                     </tr>
                 </thead>
@@ -330,21 +295,15 @@ def teacher_view():
     </div>
 
     <script>
-        const API_URL = ""; // 保持為空，讓 Canvas 環境自動設定
+        const API_URL = ""; 
         const VIEW_ENDPOINT = '/view_reports';
-        const UPDATE_ENDPOINT = '/update_status';
-        
+        const UPDATE_ENDPOINT = '/update_person_in_charge'; // 新增的 API 終端
+
         const tableBody = document.getElementById('reports-table-body');
         const loading = document.getElementById('loading');
         const messageBox = document.getElementById('message-box');
         const errorBox = document.getElementById('error-message');
         const tableContainer = document.getElementById('reports-table-container');
-
-        const STATUS_OPTIONS = [
-            {{ value: '待處理', label: '待處理', class: 'bg-yellow-100 text-yellow-800' }},
-            {{ value: '已完成', label: '已完成', class: 'bg-green-100 text-green-800' }},
-            {{ value: '未完成', label: '未完成', class: 'bg-red-100 text-red-800' }}
-        ];
 
         // 顯示訊息函式
         function showMessage(message, isSuccess) {{
@@ -360,12 +319,6 @@ def teacher_view():
                 messageBox.classList.add('hidden');
             }}, 5000);
         }}
-
-        // 根據狀態回傳 Tailwind CSS 類別
-        function getStatusClass(status) {{
-            const option = STATUS_OPTIONS.find(opt => opt.value === status);
-            return option ? option.class : 'bg-gray-100 text-gray-800';
-        }}
         
         // 渲染表格
         function renderTable(reports) {{
@@ -379,48 +332,59 @@ def teacher_view():
                 const row = tableBody.insertRow();
                 row.classList.add('hover:bg-gray-50', 'transition', 'duration-150');
                 
-                // 設置單元格內容
+                // 1. 時間
                 row.insertCell().textContent = report['報修時間'];
+                // 2. 報修人
                 row.insertCell().textContent = report['報修人姓名'];
+                // 3. 位置
                 row.insertCell().textContent = report['設備位置 / 教室名稱'];
-                row.insertCell().innerHTML = `<div class="whitespace-normal max-w-sm text-sm text-gray-600">${{report['問題詳細描述']}}</div>`;
+                // 4. 問題描述
+                row.insertCell().innerHTML = `<div class="whitespace-normal max-w-xs text-sm text-gray-600">${{report['問題詳細描述']}}</div>`;
                 
-                // 狀態顯示
-                const statusCell = row.insertCell();
-                statusCell.classList.add('px-6', 'py-4', 'whitespace-nowrap', 'text-center');
-                statusCell.innerHTML = `<span class="status-badge ${{getStatusClass(report['狀態'])}}">{{report['狀態']}}</span>`;
+                // 5. 負責人 (顯示) - 根據 G 欄資料
+                const personCell = row.insertCell();
+                personCell.classList.add('px-6', 'py-4', 'whitespace-nowrap', 'text-center', 'font-medium', 'text-gray-800');
+                const personName = report['負責人'] || '未指派'; // 假設 '負責人' 是 Sheets 中的 G 欄標題
+                
+                // 顯示負責人，如果是未指派，用紅色標記
+                if (personName === '未指派') {{
+                    personCell.innerHTML = `<span class="text-sm font-semibold text-red-500">{{personName}}</span>`;
+                }} else {{
+                    personCell.textContent = personName;
+                }}
 
-                // 操作欄位 (下拉選單與按鈕)
+                // 6. 操作欄位 (輸入框與按鈕)
                 const actionCell = row.insertCell();
-                actionCell.classList.add('px-6', 'py-4', 'whitespace-nowrap', 'text-sm', 'font-medium', 'flex', 'items-center', 'space-x-2');
+                actionCell.classList.add('px-6', 'py-4', 'whitespace-nowrap', 'text-sm', 'font-medium');
 
-                // 下拉選單
-                const selectId = `status-select-${{report.sheetRow}}`;
-                let selectHtml = `<select id="${{selectId}}" class="px-2 py-1 border border-gray-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500">`;
-                STATUS_OPTIONS.forEach(opt => {{
-                    const selected = opt.value === report['狀態'] ? 'selected' : '';
-                    selectHtml += `<option value="${{opt.value}}" ${{selected}}>{{opt.label}}</option>`;
-                }});
-                selectHtml += `</select>`;
-                actionCell.innerHTML += selectHtml;
+                const inputId = `person-input-${{report.sheetRow}}`;
+                
+                // 輸入框
+                let inputHtml = `<input type="text" id="${{inputId}}" placeholder="輸入負責人姓名" value="${{personName === '未指派' ? '' : personName}}" class="w-32 px-2 py-1 border border-gray-300 rounded-lg text-sm focus:ring-indigo-500 focus:border-indigo-500 mr-2">`;
+                actionCell.innerHTML += inputHtml;
 
                 // 更新按鈕
                 const button = document.createElement('button');
-                button.textContent = '更新';
+                button.textContent = '指派';
                 button.classList.add('update-btn', 'py-1', 'px-3', 'border', 'border-transparent', 'rounded-lg', 'shadow-sm', 'text-sm', 'font-medium', 'text-white', 'bg-indigo-600', 'hover:bg-indigo-700', 'focus:outline-none', 'focus:ring-2', 'focus:ring-offset-2', 'focus:ring-indigo-500', 'transition', 'duration-150', 'ease-in-out');
                 button.dataset.row = report.sheetRow; // 儲存 Sheet 列號
-                button.onclick = () => handleUpdateStatus(button, report.sheetRow, selectId);
+                button.onclick = () => handleUpdatePerson(button, report.sheetRow, inputId);
                 actionCell.appendChild(button);
             }});
         }}
 
-        // 處理更新狀態的函式
-        async function handleUpdateStatus(button, sheetRow, selectId) {{
-            const newStatus = document.getElementById(selectId).value;
+        // 處理更新負責人的函式
+        async function handleUpdatePerson(button, sheetRow, inputId) {{
+            const newPerson = document.getElementById(inputId).value.trim();
+
+            if (!newPerson) {{
+                showMessage("請輸入負責人的姓名。", false);
+                return;
+            }}
 
             // 鎖定按鈕
             button.disabled = true;
-            button.textContent = '更新中...';
+            button.textContent = '指派中...';
             button.classList.add('opacity-50', 'cursor-not-allowed');
 
             try {{
@@ -429,7 +393,7 @@ def teacher_view():
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ 
                         sheetRow: sheetRow, 
-                        newStatus: newStatus 
+                        newPerson: newPerson
                     }})
                 }});
 
@@ -444,11 +408,12 @@ def teacher_view():
                 }}
 
             }} catch (error) {{
-                console.error("更新失敗:", error);
-                showMessage(`更新失敗: ${{error.message}}`, false);
-                // 如果失敗，只恢復按鈕狀態
+                console.error("指派失敗:", error);
+                showMessage(`指派失敗: ${{error.message}}`, false);
+            }} finally {{
+                // 無論成功失敗都恢復按鈕狀態
                 button.disabled = false;
-                button.textContent = '更新';
+                button.textContent = '指派';
                 button.classList.remove('opacity-50', 'cursor-not-allowed');
             }}
         }}
@@ -490,10 +455,63 @@ def teacher_view():
     return Response(html_content, mimetype='text/html')
 
 
-# 4. API 路由：用於給老師查看所有報修紀錄
+# 4. API 路由：用於接收表單提交的資料 (學生填寫)
+@app.route('/submit_report', methods=['POST'])
+def submit_data_api():
+    """接收來自網頁的 POST 請求，將 JSON 資料寫入 Google Sheets。"""
+    if not sheet:
+        if not initialize_gspread():
+            return jsonify({"status": "error", "message": "伺服器初始化失敗，無法連線至 Google Sheets。請檢查 log 訊息。"}), 500
+
+    try:
+        data = request.get_json()
+    except Exception:
+        logging.error("請求資料解析失敗：不是有效的 JSON 格式。")
+        return jsonify({"status": "error", "message": "請求必須是 JSON 格式。請檢查網頁前端的 Content-Type。"}), 400
+
+    if not data:
+        logging.error("請求資料為空。")
+        return jsonify({"status": "error", "message": "請求資料為空。"}), 400
+    
+    try:
+        # 從 JSON 資料中提取欄位
+        reporterName = data.get('reporterName', 'N/A')
+        deviceLocation = data.get('deviceLocation', 'N/A')
+        problemDescription = data.get('problemDescription', 'N/A')
+        
+        if not all([reporterName != 'N/A', deviceLocation != 'N/A', problemDescription != 'N/A']):
+            logging.error(f"缺少必要資料: {data}")
+            return jsonify({"status": "error", "message": "缺少必要的報修資料（如報修人、地點或描述）。"}), 400
+
+        # 獲取當前的 UTC 時間並轉換為台灣時區
+        taiwan_time = datetime.datetime.utcnow() + datetime.timedelta(hours=8)
+        timestamp = taiwan_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # row 陣列包含 A-F 欄位：時間戳記、姓名、位置、描述、狀態、負責人 (留空)
+        row = [
+            timestamp, 
+            str(reporterName),
+            str(deviceLocation),
+            str(problemDescription),
+            "待處理", # E 欄：預設狀態
+            ""       # G 欄：負責人 (新增時留空)
+        ]
+        
+        # 將資料附加到工作表的最後一行
+        sheet.append_row(row)
+        
+        logging.info(f"資料成功寫入：{row}")
+        return jsonify({"status": "success", "message": "設備報修資料已成功送出！"}), 200
+        
+    except Exception as e:
+        logging.error(f"寫入 Google Sheets 時發生錯誤: {e}")
+        return jsonify({"status": "error", "message": f"提交失敗：{str(e)}，可能是 Sheets API 限制或連線問題。"}), 500
+
+
+# 5. API 路由：用於給老師查看所有報修紀錄
 @app.route('/view_reports', methods=['GET'])
 def view_data_api():
-    """從 Google Sheets 讀取所有報修資料，並附加 Sheets 列號。"""
+    """從 Google Sheets 讀取所有報修資料，包含負責人。"""
     if not sheet:
         if not initialize_gspread():
             return jsonify({"status": "error", "message": "伺服器初始化失敗，無法連線至 Google Sheets。"}), 500
@@ -502,19 +520,18 @@ def view_data_api():
         # 取得所有欄位標題 (第 1 行)
         headers = sheet.row_values(1)
         
-        # 確保標題至少包含 5 欄
-        if not headers or len(headers) < 5:
-            # 使用預設的 5 個欄位名稱
-            headers = ['報修時間', '報修人姓名', '設備位置 / 教室名稱', '問題詳細描述', '狀態']
+        # 確保標題至少包含 6 欄 (包含負責人)
+        if not headers or len(headers) < 6:
+            # 使用預設的 6 個欄位名稱
+            headers = ['報修時間', '報修人姓名', '設備位置 / 教室名稱', '問題詳細描述', '狀態', '負責人']
 
         # 取得所有資料 (從第 2 行開始)
-        # 這裡取得的 list of lists 是從 Sheets row 2 開始
         all_data = sheet.get_all_values()[1:]
         
         reports = []
         # 從 Sheets row 2 (即 list index 0) 開始迭代
         for index, row in enumerate(all_data):
-            # 確保資料列的長度與標題數量一致，只取前 5 欄
+            # 確保資料列的長度與標題數量一致，並只取前 6 欄
             full_row = (row + [''] * (len(headers) - len(row)))[:len(headers)]
             
             # 將欄位名稱 (headers) 與對應的資料 (full_row) 組合成字典
@@ -539,10 +556,10 @@ def view_data_api():
         return jsonify({"status": "error", "message": f"讀取資料失敗：{str(e)}。"}), 500
 
 
-# 5. API 路由：用於更新報修狀態
-@app.route('/update_status', methods=['POST'])
-def update_status_api():
-    """接收 POST 請求，根據列號 (sheetRow) 和新狀態 (newStatus) 更新 Google Sheets 資料。"""
+# 6. API 路由：用於更新負責人姓名
+@app.route('/update_person_in_charge', methods=['POST'])
+def update_person_api():
+    """接收 POST 請求，根據列號 (sheetRow) 和新負責人姓名 (newPerson) 更新 Google Sheets 資料。"""
     if not sheet:
         if not initialize_gspread():
             return jsonify({"status": "error", "message": "伺服器初始化失敗，無法連線至 Google Sheets。"}), 500
@@ -550,26 +567,21 @@ def update_status_api():
     try:
         data = request.get_json()
         sheet_row = data.get('sheetRow')
-        new_status = data.get('newStatus')
+        new_person = data.get('newPerson')
         
-        if not sheet_row or not new_status:
-            return jsonify({"status": "error", "message": "缺少必要的參數 (sheetRow 或 newStatus)。"}), 400
-
-        # 檢查新狀態是否在允許的範圍內
-        allowed_statuses = ["待處理", "已完成", "未完成"]
-        if new_status not in allowed_statuses:
-             return jsonify({"status": "error", "message": f"無效的狀態值: {new_status}。只允許 {', '.join(allowed_statuses)}。"}), 400
+        if not sheet_row or not new_person:
+            return jsonify({"status": "error", "message": "缺少必要的參數 (sheetRow 或 newPerson)。"}), 400
 
         # 執行更新
-        # 更新 E 欄 (STATUS_COLUMN_INDEX = 5) 在指定列 (sheet_row) 的值
-        sheet.update_cell(sheet_row, STATUS_COLUMN_INDEX, new_status)
+        # 更新 G 欄 (PERSON_IN_CHARGE_COLUMN_INDEX = 6) 在指定列 (sheet_row) 的值
+        sheet.update_cell(sheet_row, PERSON_IN_CHARGE_COLUMN_INDEX, str(new_person))
         
-        logging.info(f"成功更新列 {sheet_row} 的狀態為: {new_status}")
-        return jsonify({"status": "success", "message": f"第 {sheet_row} 列的狀態已成功更新為「{new_status}」。"}), 200
+        logging.info(f"成功更新列 {sheet_row} 的負責人為: {new_person}")
+        return jsonify({"status": "success", "message": f"第 {sheet_row} 列的負責人已成功指派為「{new_person}」。"}), 200
         
     except Exception as e:
-        logging.error(f"更新 Google Sheets 狀態時發生錯誤: {e}")
-        return jsonify({"status": "error", "message": f"更新狀態失敗：{str(e)}，可能是 Sheets API 限制或連線問題。"}), 500
+        logging.error(f"更新 Google Sheets 負責人時發生錯誤: {e}")
+        return jsonify({"status": "error", "message": f"更新負責人失敗：{str(e)}，可能是 Sheets API 限制或連線問題。"}), 500
 
 
 # ----------------------------------------------------
@@ -579,4 +591,3 @@ if __name__ == '__main__':
     with app.app_context():
         initialize_gspread()
     app.run(debug=True, host='0.0.0.0', port=os.environ.get('PORT', 5000))
-# student_look
