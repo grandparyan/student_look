@@ -46,8 +46,7 @@
             </svg>
             <h1 class="text-3xl font-bold text-gray-900">報修紀錄追蹤與處理 (教師/管理員)</h1>
             <p class="text-gray-500 mt-1">即時查看並更新報修狀態與負責人。</p>
-            <!-- 連結已更新至 student.html -->
-            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="./student.html">點此前往學生報修表單</a></p>
+            <!-- 原本的切換連結已移除 -->
         </div>
 
         <!-- 訊息顯示區塊 -->
@@ -69,7 +68,7 @@
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
                         <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師/負責人</th> <!-- 標題已更新 -->
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師/負責人</th> 
                         <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">狀態</th>
                         <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">操作</th>
                     </tr>
@@ -176,7 +175,6 @@
                 });
                 selectHtml += `</select>`;
                 statusCell.innerHTML = selectHtml;
-                // statusCell.innerHTML += `<span class="status-badge ${getStatusClass(report['狀態'])}">${report['狀態']}</span>`;
 
                 // 7. 操作欄位 (更新按鈕)
                 const actionCell = row.insertCell();
