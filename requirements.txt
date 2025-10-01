@@ -1,7 +1,7 @@
-Flask-CORS
+
 Flask
-gunicorn
+Flask-CORS # 解決 ModuleNotFoundError: No module named 'flask_cors' 錯誤
+gunicorn # 修正 TypeError: Flask.call 錯誤，使用正確的 WSGI 伺服器
+
 gspread
 oauth2client
-
-uvicorn
