@@ -1,3 +1,7 @@
-Flask 
-gspread 
-oauth2client 
+
+Flask
+
+gspread
+oauth2client
+
+uvicorn
