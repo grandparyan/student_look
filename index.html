@@ -3,289 +3,377 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>設備報修系統 - 教師/管理員介面</title>
+    <title>報修紀錄追蹤與處理 (教師/管理員)</title>
     <!-- 載入 Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'primary-blue': '#4F46E5',
+                        'primary-dark': '#3730A3',
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        /* 使用 Inter 字體以確保跨平台一致性 */
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: #e2e8f0; 
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
         }
-        /* 狀態標籤樣式 */
-        .status-badge {
-            padding: 4px 8px;
-            border-radius: 9999px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            display: inline-block;
+        /* 隱藏原生捲軸，但保留滾動功能 */
+        .custom-scrollbar::-webkit-scrollbar {
+            display: none;
         }
-        /* 表格內描述欄位樣式 */
-        .description-cell {
-            white-space: normal;
-            max-width: 15rem; /* 限制寬度，確保手機排版不會過長 */
-            text-overflow: ellipsis;
-            overflow: hidden;
-        }
-        /* 針對行動裝置優化表格邊界 */
-        @media (max-width: 768px) {
-             .hide-on-mobile {
-                 display: none;
-             }
+        .custom-scrollbar {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
         }
     </style>
 </head>
-<body class="min-h-screen p-4 md:p-8">
+<body>
+    <div class="min-h-screen p-4 md:p-8">
+        <!-- 標題區域 -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">報修紀錄追蹤與處理 (教師/管理員)</h1>
+            <p class="text-gray-600 mb-4">即時查看並更新報修狀態與指派負責人。</p>
+            <a href="#" class="text-primary-blue hover:text-primary-dark transition duration-150 ease-in-out text-sm" onclick="alert('點擊此處將導向學生報修頁面或表單。'); return false;">點擊前往學生報修介面</a>
+        </header>
 
-    <div class="max-w-7xl mx-auto bg-white p-6 md:p-8 rounded-xl shadow-2xl">
-        
-        <!-- 標題區塊 -->
-        <div class="text-center mb-8">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-indigo-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.807 3.42 3.42 0 014.288 0 3.42 3.42 0 001.946.807M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <h1 class="text-3xl font-bold text-gray-900">報修紀錄追蹤與處理 (教師/管理員)</h1>
-            <p class="text-gray-500 mt-1">即時查看並更新報修狀態與負責人。</p>
-            <!-- 已移除切換到學生表單的連結 -->
+        <!-- 表格容器 -->
+        <div id="loading" class="text-center text-primary-blue text-lg font-semibold my-12">
+            載入中，請稍候...
         </div>
 
-        <!-- 訊息顯示區塊 -->
-        <div id="message-box" class="hidden mb-6 p-3 text-center rounded-lg font-medium transition-all duration-300"></div>
-
-        <!-- 載入中/錯誤區塊 -->
-        <div id="loading" class="text-center text-gray-500 p-10">
-            <svg class="animate-spin h-5 w-5 mr-3 inline text-indigo-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="30" stroke-dashoffset="0" style="stroke-dasharray: 80, 20; stroke-dashoffset: 0;"></circle></svg>
-            正在載入報修紀錄...
-        </div>
-        <div id="error-message" class="hidden text-center p-4 text-red-600 font-bold border border-red-300 bg-red-50 rounded-lg"></div>
-
-        <!-- 報修表格區塊 -->
-        <div id="reports-table-container" class="hidden overflow-x-auto shadow-md rounded-xl border border-gray-200">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-indigo-600 text-white">
-                    <tr>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">時間</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
-                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師/負責人</th> 
-                        <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">狀態</th>
-                        <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">操作</th>
-                    </tr>
-                </thead>
-                <tbody id="reports-table-body" class="bg-white divide-y divide-gray-200">
-                    <!-- 紀錄將透過 JavaScript 動態載入 -->
-                </tbody>
-            </table>
+        <div id="table-container" class="bg-white shadow-xl rounded-xl overflow-hidden hidden">
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-primary-blue text-white">
+                        <tr>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">時間</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">聯絡電話</th> <!-- 新增欄位 -->
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">設備名稱/類型</th> <!-- 新增欄位 -->
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">狀態</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">負責人</th>
+                            <th scope="col" class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="reports-table-body" class="bg-white divide-y divide-gray-200">
+                        <!-- 資料將由 JavaScript 填充 -->
+                    </tbody>
+                </table>
+            </div>
+            <!-- 錯誤訊息顯示區塊 -->
+            <div id="error-message" class="p-4 text-center text-red-600 hidden"></div>
+            <!-- 無資料顯示區塊 -->
+            <div id="no-data-message" class="p-4 text-center text-gray-500 hidden">目前沒有報修紀錄。</div>
         </div>
     </div>
 
-    <script>
-        // 設定 API 終端點 (假設與您的 Python/Render 服務一致)
-        const API_URL = ""; 
-        const VIEW_ENDPOINT = '/view_reports';
-        const UPDATE_ENDPOINT = '/update_status'; // 此 API 預期同時接收 newStatus 和 newTeacher
-        
-        const tableBody = document.getElementById('reports-table-body');
-        const loading = document.getElementById('loading');
-        const messageBox = document.getElementById('message-box');
-        const errorBox = document.getElementById('error-message');
-        const tableContainer = document.getElementById('reports-table-container');
+    <!-- 模態框用於顯示錯誤或提示 -->
+    <div id="modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 shadow-2xl max-w-sm w-full">
+            <h3 id="modal-title" class="text-xl font-bold mb-4 text-gray-800">提示</h3>
+            <p id="modal-body" class="mb-6 text-gray-600"></p>
+            <button onclick="closeModal()" class="w-full bg-primary-blue hover:bg-primary-dark text-white font-bold py-2 px-4 rounded-lg transition duration-150 ease-in-out">
+                確認
+            </button>
+        </div>
+    </div>
 
-        // 狀態選項配置
+    <script type="module">
+        // ====================================================================
+        // Firebase Setup & Global Variables (MANDATORY)
+        // ====================================================================
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, query, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firestore Setup and User ID acquisition (Mandatory)
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        
+        // 啟用 Firebase 偵錯日誌
+        setLogLevel('debug');
+
+        let currentUserId = null;
+        let isAuthReady = false;
+
+        // 報修狀態選項
         const STATUS_OPTIONS = [
-            { value: '待處理', label: '待處理', class: 'bg-yellow-100 text-yellow-800' },
-            { value: '已完成', label: '已完成', class: 'bg-green-100 text-green-800' },
-            { value: '未完成', label: '未完成', class: 'bg-red-100 text-red-800' }
+            { value: '待處理', label: '待處理' },
+            { value: '處理中', label: '處理中' },
+            { value: '已修復', label: '已修復' },
+            { value: '無法修復', label: '無法修復' },
         ];
 
-        // 顯示訊息函式
-        function showMessage(message, isSuccess) {
-            messageBox.textContent = message;
-            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800');
-            
-            if (isSuccess) {
-                messageBox.classList.add('bg-green-100', 'text-green-800');
-            } else {
-                messageBox.classList.add('bg-red-100', 'text-red-800');
-            }
-            // 5 秒後隱藏訊息
-            setTimeout(() => {
-                messageBox.classList.add('hidden');
-            }, 5000);
+        // API 設置 (使用 /artifacts/{appId}/public/data/reports 作為集合)
+        const REPORTS_COLLECTION_PATH = `artifacts/${appId}/public/data/reports`;
+        
+        // ====================================================================
+        // UI Helpers
+        // ====================================================================
+
+        function showModal(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-body').textContent = message;
+            document.getElementById('modal').classList.remove('hidden');
+            document.getElementById('modal').classList.add('flex');
         }
 
-        // 根據狀態回傳 Tailwind CSS 類別
-        function getStatusClass(status) {
-            const option = STATUS_OPTIONS.find(opt => opt.value === status);
-            return option ? option.class : 'bg-gray-100 text-gray-800';
+        function closeModal() {
+            document.getElementById('modal').classList.add('hidden');
+            document.getElementById('modal').classList.remove('flex');
         }
-        
-        // 渲染表格
+
+        function showLoading() {
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('table-container').classList.add('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('table-container').classList.remove('hidden');
+        }
+
+        function showErrorMessage(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = '錯誤: ' + message;
+            errorDiv.classList.remove('hidden');
+            document.getElementById('no-data-message').classList.add('hidden');
+        }
+
+        function showNoDataMessage() {
+            document.getElementById('no-data-message').classList.remove('hidden');
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        function hideMessages() {
+            document.getElementById('no-data-message').classList.add('hidden');
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        // ====================================================================
+        // Data Handling (Render, Update)
+        // ====================================================================
+
+        /**
+         * 根據報修紀錄資料渲染表格。
+         * @param {Array<Object>} reports - 報修紀錄陣列
+         */
         function renderTable(reports) {
-            tableBody.innerHTML = '';
-            
+            const tableBody = document.getElementById('reports-table-body');
+            tableBody.innerHTML = ''; // 清空舊資料
+            hideMessages();
+
             if (reports.length === 0) {
-                // colspan 是 7，因為有 7 個欄位
-                tableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">目前沒有任何報修紀錄。</td></tr>';
+                showNoDataMessage();
                 return;
             }
 
             reports.forEach(report => {
                 const row = tableBody.insertRow();
-                row.classList.add('hover:bg-gray-50', 'transition', 'duration-150');
-                
-                // 1. 報修時間 (隱藏於手機版)
-                const timeCell = row.insertCell();
-                timeCell.textContent = report['報修時間'];
-                timeCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'text-gray-500', 'hide-on-mobile');
-                
-                // 2. 報修人
-                row.insertCell().textContent = report['報修人姓名'];
-                
-                // 3. 位置
-                row.insertCell().textContent = report['設備位置 / 教室名稱'];
-                
-                // 4. 問題描述
-                const descriptionCell = row.insertCell();
-                descriptionCell.innerHTML = `<div class="description-cell text-sm text-gray-600">${report['問題詳細描述']}</div>`;
-                
-                // 5. 協辦老師/負責人 (現在是可編輯輸入框)
-                const teacherCell = row.insertCell();
-                const teacherInputId = `teacher-input-${report.sheetRow}`;
-                teacherCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'hide-on-mobile');
-                // 預設值為 '無指定' 時顯示空字串，讓使用者易於輸入
-                const teacherValue = report['協辦老師'] === '無指定' ? '' : report['協辦老師'];
-                teacherCell.innerHTML = `
-                    <input type="text" id="${teacherInputId}" 
-                           value="${teacherValue}"
-                           placeholder="輸入負責人姓名"
-                           class="w-full px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-indigo-500 focus:border-indigo-500 transition duration-150"
-                    >`;
+                row.className = 'hover:bg-gray-50 transition duration-150 ease-in-out';
+                row.dataset.docId = report.id; // 儲存 Firestore 文件 ID
 
-                // 6. 狀態顯示 (下拉選單)
+                // 1. 報修時間 (A欄)
+                row.insertCell().textContent = report['報修時間'] || '';
+                
+                // 2. 報修人 (B欄)
+                row.insertCell().textContent = report['報修人姓名'] || '';
+
+                // 3. 聯絡電話 (新增的常用欄位)
+                row.insertCell().textContent = report['聯絡電話'] || '';
+
+                // 4. 位置 (C欄)
+                row.insertCell().textContent = report['設備位置 / 教室名稱'] || '';
+
+                // 5. 設備名稱/類型 (新增的常用欄位)
+                // 注意：這裡使用 '設備名稱/類型' 作為範例鍵名，請確保它與您的試算表欄位名稱一致
+                row.insertCell().textContent = report['設備名稱/類型'] || '';
+                
+                // 6. 問題描述 (D欄)
+                row.insertCell().textContent = report['問題詳細描述'] || '';
+                
+                // 7. 狀態 (E欄) - 可編輯下拉選單
                 const statusCell = row.insertCell();
-                statusCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-center');
-
-                const selectId = `status-select-${report.sheetRow}`;
-                let selectHtml = `<select id="${selectId}" class="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-indigo-500 focus:border-indigo-500">`;
-                STATUS_OPTIONS.forEach(opt => {
-                    const selected = opt.value === report['狀態'] ? 'selected' : '';
-                    selectHtml += `<option value="${opt.value}" ${selected}>${opt.label}</option>`;
-                });
-                selectHtml += `</select>`;
-                statusCell.innerHTML = selectHtml;
-
-                // 7. 操作欄位 (更新按鈕)
-                const actionCell = row.insertCell();
-                actionCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'font-medium', 'flex', 'flex-col', 'md:flex-row', 'items-center', 'space-y-1', 'md:space-y-0', 'md:space-x-2', 'justify-center');
-
-                // 更新按鈕
-                const button = document.createElement('button');
-                button.textContent = '更新';
-                button.classList.add('update-btn', 'py-1', 'px-3', 'border', 'border-transparent', 'rounded-lg', 'shadow-sm', 'text-xs', 'md:text-sm', 'font-medium', 'text-white', 'bg-indigo-600', 'hover:bg-indigo-700', 'focus:outline-none', 'focus:ring-2', 'focus:ring-offset-2', 'focus:ring-indigo-500', 'transition', 'duration-150', 'ease-in-out', 'w-full', 'md:w-auto');
+                const statusSelect = document.createElement('select');
+                statusSelect.className = 'w-full px-2 py-1 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue bg-white text-sm';
                 
-                // 綁定點擊事件，傳遞 selectId 和 teacherInputId
-                button.onclick = () => handleUpdateStatus(button, report.sheetRow, selectId, teacherInputId);
-                actionCell.appendChild(button);
+                STATUS_OPTIONS.forEach(option => {
+                    const opt = document.createElement('option');
+                    opt.value = option.value;
+                    opt.textContent = option.label;
+                    if (option.value === (report['狀態'] || '待處理')) {
+                        opt.selected = true;
+                    }
+                    statusSelect.appendChild(opt);
+                });
+                statusCell.appendChild(statusSelect);
+
+
+                // 8. 負責人 (F欄 - 編輯欄位)
+                const teacherCell = row.insertCell();
+                const teacherInput = document.createElement('input');
+                teacherInput.type = 'text';
+                teacherInput.className = 'w-full px-2 py-1 border border-gray-300 rounded-lg focus:ring-primary-blue focus:border-primary-blue';
+                teacherInput.value = report['負責人'] || ''; // 讀取已指派的負責人
+                teacherInput.placeholder = '輸入負責人姓名';
+                teacherCell.appendChild(teacherInput);
+
+                // 9. 操作 (更新按鈕)
+                const actionCell = row.insertCell();
+                const updateButton = document.createElement('button');
+                updateButton.textContent = '更新';
+                updateButton.className = 'bg-green-500 hover:bg-green-600 text-white font-semibold py-1 px-3 rounded-lg text-xs transition duration-150 ease-in-out shadow-md';
+                
+                // 重新定義更新按鈕的行為，同時傳送 狀態 和 負責人
+                updateButton.onclick = () => handleUpdate(
+                    report.id, 
+                    statusSelect.value, // 新狀態
+                    teacherInput.value  // 新負責人
+                );
+                
+                actionCell.appendChild(updateButton);
             });
         }
 
-        // 處理更新狀態的函式
-        async function handleUpdateStatus(button, sheetRow, selectId, teacherInputId) {
-            // 取得新的狀態值
-            const newStatus = document.getElementById(selectId).value;
-            // 取得新的協辦老師/負責人值，如果為空則設為 '無指定'
-            const newTeacher = document.getElementById(teacherInputId).value.trim() || '無指定'; 
-
-            // 鎖定按鈕
-            button.disabled = true;
-            button.textContent = '更新中...';
-            button.classList.add('opacity-50', 'cursor-not-allowed');
-
-            try {
-                // 為了單獨預覽，如果沒有 API_URL，則模擬成功
-                if (API_URL === '') {
-                    await new Promise(resolve => setTimeout(resolve, 500)); 
-                    showMessage(`模擬更新成功：第 ${sheetRow} 列的狀態已更新為「${newStatus}」，負責人設定為「${newTeacher}」。`, true);
-                    // 模擬更新後重新載入資料以反映變更 (這裡的模擬重新載入會保留舊的模擬資料)
-                    await fetchReports();
-                    return;
-                }
-                
-                const response = await fetch(API_URL + UPDATE_ENDPOINT, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        sheetRow: sheetRow, 
-                        newStatus: newStatus,
-                        newTeacher: newTeacher // 傳送新的負責人姓名
-                    })
-                });
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    showMessage(result.message, true);
-                    await fetchReports();
-                } else {
-                    throw new Error(result.message || `API 錯誤：HTTP 狀態碼 ${response.status}`);
-                }
-
-            } catch (error) {
-                console.error("更新失敗:", error);
-                showMessage(`更新失敗: ${error.message}`, false);
-            } finally {
-                // 恢復按鈕狀態
-                button.disabled = false;
-                button.textContent = '更新';
-                button.classList.remove('opacity-50', 'cursor-not-allowed');
+        /**
+         * 取得狀態的 Tailwind CSS 類別名稱。
+         * @param {string} status - 報修狀態
+         * @returns {string} CSS 類別名稱
+         */
+        function getStatusClass(status) {
+            // 這個函式目前沒有被 renderTable 使用，因為狀態已改為下拉選單，
+            // 但保留用於未來可能需要顯示顏色標籤的欄位。
+            switch (status) {
+                case '處理中':
+                    return 'text-orange-600 font-semibold';
+                case '已修復':
+                    return 'text-green-600 font-semibold';
+                case '無法修復':
+                    return 'text-red-600 font-semibold';
+                case '待處理':
+                default:
+                    return 'text-blue-600 font-semibold';
             }
         }
 
-        // 獲取報修紀錄
-        async function fetchReports() {
-            loading.classList.remove('hidden');
-            tableContainer.classList.add('hidden');
-            errorBox.classList.add('hidden');
-            messageBox.classList.add('hidden');
+        /**
+         * 處理更新狀態和負責人的邏輯
+         * @param {string} docId - Firestore 文件 ID
+         * @param {string} newStatus - 新的狀態值
+         * @param {string} newTeacher - 新的負責人姓名
+         */
+        async function handleUpdate(docId, newStatus, newTeacher) {
+            if (!currentUserId) {
+                showModal('錯誤', '使用者驗證失敗，請稍後重試。');
+                return;
+            }
+
+            try {
+                // 確保 docId, newStatus, newTeacher 都是有效的
+                if (!docId) {
+                    throw new Error('缺少文件 ID');
+                }
+
+                // 構建更新資料物件
+                const updateData = {
+                    '狀態': newStatus || '待處理',
+                    '負責人': newTeacher || '', // 負責人可以為空字串
+                };
+
+                // 更新 Firestore 文件
+                const docRef = doc(db, REPORTS_COLLECTION_PATH, docId);
+                await updateDoc(docRef, updateData);
+
+                showModal('成功', `報修紀錄 #${docId.substring(0, 5)}... 已成功更新狀態為: ${newStatus}，負責人為: ${newTeacher || '未指派'}`);
+                
+                // 更新成功後，onSnapshot 會自動觸發重新渲染
+            } catch (error) {
+                console.error("更新紀錄失敗:", error);
+                showModal('更新失敗', `更新報修紀錄時發生錯誤: ${error.message}`);
+            }
+        }
+
+        // ====================================================================
+        // Initialization & Authentication
+        // ====================================================================
+
+        /**
+         * 設置 Firestore 監聽器以實時獲取報修紀錄
+         */
+        function setupFirestoreListener() {
+            if (!isAuthReady) return; // 確保在驗證完成後才開始監聽
+
+            // 建立查詢，獲取整個公開集合的所有文件
+            const q = query(collection(db, REPORTS_COLLECTION_PATH));
             
-            try {
-                if (API_URL === '') {
-                    // 模擬 API 呼叫的延遲
-                    await new Promise(resolve => setTimeout(resolve, 800)); 
-                    const mockReports = [
-                        { "報修時間": "2025-10-01 09:30:00", "報修人姓名": "王小明", "設備位置 / 教室名稱": "電腦教室 A201", "問題詳細描述": "投影機無法開機，電源燈恆亮紅色。", "協辦老師": "詹老師", "狀態": "待處理", "sheetRow": 2 },
-                        { "報修時間": "2025-10-01 10:15:00", "報修人姓名": "李大華", "設備位置 / 教室名稱": "103 班級", "問題詳細描述": "班級電腦鍵盤 'Enter' 鍵損壞，無法輸入。", "協辦老師": "無指定", "狀態": "已完成", "sheetRow": 3 },
-                        { "報修時間": "2025-10-01 14:45:00", "報修人姓名": "林美玲", "設備位置 / 教室名稱": "圖書館 3F", "問題詳細描述": "公用印表機一直出現卡紙錯誤，但裡面沒看到紙。", "協辦老師": "陳老師", "狀態": "待處理", "sheetRow": 4 },
-                        { "報修時間": "2025-09-30 16:20:00", "報修人姓名": "張偉", "設備位置 / 教室名稱": "視聽室", "問題詳細描述": "音響系統有雜音，且麥克風訊號斷斷續續。", "協辦老師": "佘老師", "狀態": "未完成", "sheetRow": 5 }
-                    ];
-                    renderTable(mockReports);
-                    tableContainer.classList.remove('hidden');
-                    return;
-                }
+            // 實時監聽資料變更
+            onSnapshot(q, (querySnapshot) => {
+                const reports = [];
+                querySnapshot.forEach((doc) => {
+                    // 將文件 ID 也儲存在資料物件中，用於更新操作
+                    reports.push({ id: doc.id, ...doc.data() });
+                });
                 
-                const response = await fetch(API_URL + VIEW_ENDPOINT);
-                const result = await response.json();
-
-                if (response.ok && result.status === 'success') {
-                    renderTable(result.reports);
-                    tableContainer.classList.remove('hidden');
-                } else {
-                    throw new Error(result.message || '無法從伺服器取得資料。');
-                }
-
-            } catch (error) {
-                console.error("載入紀錄失敗:", error);
-                errorBox.textContent = `載入報修紀錄失敗：${error.message} (如果您正在單獨預覽，請注意這是模擬資料)`;
-                errorBox.classList.remove('hidden');
-            } finally {
-                loading.classList.add('hidden');
-            }
+                // 依據報修時間降冪排序 (最新的在最上面)
+                reports.sort((a, b) => new Date(b['報修時間']) - new Date(a['報修時間']));
+                
+                hideLoading();
+                renderTable(reports);
+            }, (error) => {
+                console.error("Firestore 實時監聽失敗:", error);
+                hideLoading();
+                showErrorMessage(`無法載入資料。錯誤: ${error.message}`);
+            });
         }
 
-        // 頁面載入時執行
-        window.onload = fetchReports;
+        /**
+         * 初始化 Firebase 驗證
+         */
+        async function initAuth() {
+            showLoading();
+            
+            // 優先使用自訂 Token 登入，否則使用匿名登入
+            if (__initial_auth_token) {
+                try {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } catch (error) {
+                    console.error("Custom token sign in failed. Falling back to anonymous.", error);
+                    await signInAnonymously(auth);
+                }
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            // 設置身份驗證狀態監聽
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    currentUserId = user.uid;
+                } else {
+                    // 如果用戶登出，使用隨機 ID 作為匿名用戶標識，但由於此處強制登入，此情況較少見
+                    currentUserId = crypto.randomUUID();
+                }
+                isAuthReady = true;
+                setupFirestoreListener(); // 驗證完成後開始監聽資料
+            });
+        }
+
+        // 啟動應用程式
+        initAuth();
 
     </script>
 </body>
