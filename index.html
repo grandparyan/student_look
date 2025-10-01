@@ -324,10 +324,22 @@
             // 實時監聽資料變更
             onSnapshot(q, (querySnapshot) => {
                 const reports = [];
+                // --- DEBUG LOG START ---
+                console.log(`[Firestore] 成功取得 ${querySnapshot.size} 筆文件。`);
+                // --- DEBUG LOG END ---
+                
                 querySnapshot.forEach((doc) => {
-                    // 將文件 ID 也儲存在資料物件中，用於更新操作
-                    reports.push({ id: doc.id, ...doc.data() });
+                    try {
+                        // 將文件 ID 也儲存在資料物件中，用於更新操作
+                        reports.push({ id: doc.id, ...doc.data() });
+                    } catch (e) {
+                        console.error(`[Firestore Error] 處理文件 ID: ${doc.id} 時發生錯誤:`, e);
+                    }
                 });
+
+                // --- DEBUG LOG START ---
+                console.log(`[Rendering] 準備渲染 ${reports.length} 筆紀錄到表格。`);
+                // --- DEBUG LOG END ---
                 
                 // 依據報修時間降冪排序 (最新的在最上面)
                 reports.sort((a, b) => new Date(b['報修時間']) - new Date(a['報修時間']));
