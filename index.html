@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>設備報修系統 - 教師/管理員介面</title>
+    <!-- 載入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 使用 Inter 字體以確保跨平台一致性 */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #e2e8f0; 
+        }
+        /* 狀態標籤樣式 */
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+        /* 表格內描述欄位樣式 */
+        .description-cell {
+            white-space: normal;
+            max-width: 15rem; /* 限制寬度，確保手機排版不會過長 */
+            text-overflow: ellipsis;
+            overflow: hidden;
+        }
+        /* 針對行動裝置優化表格邊界 */
+        @media (max-width: 768px) {
+             .hide-on-mobile {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+    <div class="max-w-7xl mx-auto bg-white p-6 md:p-8 rounded-xl shadow-2xl">
+        
+        <!-- 標題區塊 -->
+        <div class="text-center mb-8">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-indigo-600 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.807 3.42 3.42 0 014.288 0 3.42 3.42 0 001.946.807M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h1 class="text-3xl font-bold text-gray-900">報修紀錄追蹤與處理 (教師/管理員)</h1>
+            <p class="text-gray-500 mt-1">即時查看並更新報修狀態。</p>
+            <!-- 連結已更新至 student.html -->
+            <p class="text-xs mt-3 text-indigo-500 hover:underline"><a href="./student.html">點此前往學生報修表單</a></p>
+        </div>
+
+        <!-- 訊息顯示區塊 -->
+        <div id="message-box" class="hidden mb-6 p-3 text-center rounded-lg font-medium transition-all duration-300"></div>
+
+        <!-- 載入中/錯誤區塊 -->
+        <div id="loading" class="text-center text-gray-500 p-10">
+            <svg class="animate-spin h-5 w-5 mr-3 inline text-indigo-600" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-dasharray="30" stroke-dashoffset="0" style="stroke-dasharray: 80, 20; stroke-dashoffset: 0;"></circle></svg>
+            正在載入報修紀錄...
+        </div>
+        <div id="error-message" class="hidden text-center p-4 text-red-600 font-bold border border-red-300 bg-red-50 rounded-lg"></div>
+
+        <!-- 報修表格區塊 -->
+        <div id="reports-table-container" class="hidden overflow-x-auto shadow-md rounded-xl border border-gray-200">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-indigo-600 text-white">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">時間</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">報修人</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">位置</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider">問題描述</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider hide-on-mobile">協辦老師</th>
+                        <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">狀態</th>
+                        <th class="px-3 py-3 text-center text-xs font-medium uppercase tracking-wider">操作</th>
+                    </tr>
+                </thead>
+                <tbody id="reports-table-body" class="bg-white divide-y divide-gray-200">
+                    <!-- 紀錄將透過 JavaScript 動態載入 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 設定 API 終端點 (假設與您的 Python/Render 服務一致)
+        const API_URL = ""; 
+        const VIEW_ENDPOINT = '/view_reports';
+        const UPDATE_ENDPOINT = '/update_status';
+        
+        const tableBody = document.getElementById('reports-table-body');
+        const loading = document.getElementById('loading');
+        const messageBox = document.getElementById('message-box');
+        const errorBox = document.getElementById('error-message');
+        const tableContainer = document.getElementById('reports-table-container');
+
+        // 狀態選項配置
+        const STATUS_OPTIONS = [
+            { value: '待處理', label: '待處理', class: 'bg-yellow-100 text-yellow-800' },
+            { value: '已完成', label: '已完成', class: 'bg-green-100 text-green-800' },
+            { value: '未完成', label: '未完成', class: 'bg-red-100 text-red-800' }
+        ];
+
+        // 顯示訊息函式
+        function showMessage(message, isSuccess) {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-800', 'bg-green-100', 'text-green-800');
+            
+            if (isSuccess) {
+                messageBox.classList.add('bg-green-100', 'text-green-800');
+            } else {
+                messageBox.classList.add('bg-red-100', 'text-red-800');
+            }
+            // 5 秒後隱藏訊息
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        // 根據狀態回傳 Tailwind CSS 類別
+        function getStatusClass(status) {
+            const option = STATUS_OPTIONS.find(opt => opt.value === status);
+            return option ? option.class : 'bg-gray-100 text-gray-800';
+        }
+        
+        // 渲染表格
+        function renderTable(reports) {
+            tableBody.innerHTML = '';
+            
+            if (reports.length === 0) {
+                // colspan 是 7，因為有 7 個欄位
+                tableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">目前沒有任何報修紀錄。</td></tr>';
+                return;
+            }
+
+            reports.forEach(report => {
+                const row = tableBody.insertRow();
+                row.classList.add('hover:bg-gray-50', 'transition', 'duration-150');
+                
+                // 1. 報修時間 (隱藏於手機版)
+                const timeCell = row.insertCell();
+                timeCell.textContent = report['報修時間'];
+                timeCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'text-gray-500', 'hide-on-mobile');
+                
+                // 2. 報修人
+                row.insertCell().textContent = report['報修人姓名'];
+                
+                // 3. 位置
+                row.insertCell().textContent = report['設備位置 / 教室名稱'];
+                
+                // 4. 問題描述
+                const descriptionCell = row.insertCell();
+                descriptionCell.innerHTML = `<div class="description-cell text-sm text-gray-600">${report['問題詳細描述']}</div>`;
+                
+                // 5. 協辦老師 (隱藏於手機版)
+                const teacherCell = row.insertCell();
+                teacherCell.textContent = report['協辦老師'];
+                teacherCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'text-gray-500', 'hide-on-mobile');
+
+                // 6. 狀態顯示
+                const statusCell = row.insertCell();
+                statusCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-center');
+                statusCell.innerHTML = `<span class="status-badge ${getStatusClass(report['狀態'])}">${report['狀態']}</span>`;
+
+                // 7. 操作欄位 (下拉選單與按鈕)
+                const actionCell = row.insertCell();
+                actionCell.classList.add('px-3', 'py-3', 'whitespace-nowrap', 'text-sm', 'font-medium', 'flex', 'flex-col', 'md:flex-row', 'items-center', 'space-y-1', 'md:space-y-0', 'md:space-x-2');
+
+                // 下拉選單
+                const selectId = `status-select-${report.sheetRow}`;
+                let selectHtml = `<select id="${selectId}" class="px-2 py-1 border border-gray-300 rounded-lg text-xs md:text-sm focus:ring-indigo-500 focus:border-indigo-500">`;
+                STATUS_OPTIONS.forEach(opt => {
+                    const selected = opt.value === report['狀態'] ? 'selected' : '';
+                    selectHtml += `<option value="${opt.value}" ${selected}>${opt.label}</option>`;
+                });
+                selectHtml += `</select>`;
+                actionCell.innerHTML += selectHtml;
+
+                // 更新按鈕
+                const button = document.createElement('button');
+                button.textContent = '更新';
+                button.classList.add('update-btn', 'py-1', 'px-3', 'border', 'border-transparent', 'rounded-lg', 'shadow-sm', 'text-xs', 'md:text-sm', 'font-medium', 'text-white', 'bg-indigo-600', 'hover:bg-indigo-700', 'focus:outline-none', 'focus:ring-2', 'focus:ring-offset-2', 'focus:ring-indigo-500', 'transition', 'duration-150', 'ease-in-out', 'w-full', 'md:w-auto');
+                button.dataset.row = report.sheetRow; // 儲存 Sheet 列號
+                button.onclick = () => handleUpdateStatus(button, report.sheetRow, selectId);
+                actionCell.appendChild(button);
+            });
+        }
+
+        // 處理更新狀態的函式
+        async function handleUpdateStatus(button, sheetRow, selectId) {
+            const newStatus = document.getElementById(selectId).value;
+
+            // 鎖定按鈕
+            button.disabled = true;
+            button.textContent = '更新中...';
+            button.classList.add('opacity-50', 'cursor-not-allowed');
+
+            try {
+                // 為了單獨預覽，如果沒有 API_URL，則模擬成功
+                if (API_URL === '') {
+                     await new Promise(resolve => setTimeout(resolve, 500)); 
+                     showMessage(`模擬更新成功：第 ${sheetRow} 列的狀態已成功更新為「${newStatus}」。`, true);
+                     await fetchReports();
+                     return;
+                }
+                
+                const response = await fetch(API_URL + UPDATE_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        sheetRow: sheetRow, 
+                        newStatus: newStatus 
+                    })
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showMessage(result.message, true);
+                    await fetchReports();
+                } else {
+                    throw new Error(result.message || `API 錯誤：HTTP 狀態碼 ${response.status}`);
+                }
+
+            } catch (error) {
+                console.error("更新失敗:", error);
+                showMessage(`更新失敗: ${error.message}`, false);
+            } finally {
+                // 恢復按鈕狀態
+                button.disabled = false;
+                button.textContent = '更新';
+                button.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        // 獲取報修紀錄
+        async function fetchReports() {
+            loading.classList.remove('hidden');
+            tableContainer.classList.add('hidden');
+            errorBox.classList.add('hidden');
+            messageBox.classList.add('hidden');
+            
+            try {
+                if (API_URL === '') {
+                    // 模擬 API 呼叫的延遲
+                    await new Promise(resolve => setTimeout(resolve, 800)); 
+                    const mockReports = [
+                        { "報修時間": "2025-10-01 09:30:00", "報修人姓名": "王小明", "設備位置 / 教室名稱": "電腦教室 A201", "問題詳細描述": "投影機無法開機，電源燈恆亮紅色。", "協辦老師": "詹老師", "狀態": "待處理", "sheetRow": 2 },
+                        { "報修時間": "2025-10-01 10:15:00", "報修人姓名": "李大華", "設備位置 / 教室名稱": "103 班級", "問題詳細描述": "班級電腦鍵盤 'Enter' 鍵損壞，無法輸入。", "協辦老師": "無指定", "狀態": "已完成", "sheetRow": 3 },
+                        { "報修時間": "2025-10-01 14:45:00", "報修人姓名": "林美玲", "設備位置 / 教室名稱": "圖書館 3F", "問題詳細描述": "公用印表機一直出現卡紙錯誤，但裡面沒看到紙。", "協辦老師": "陳老師", "狀態": "待處理", "sheetRow": 4 },
+                        { "報修時間": "2025-09-30 16:20:00", "報修人姓名": "張偉", "設備位置 / 教室名稱": "視聽室", "問題詳細描述": "音響系統有雜音，且麥克風訊號斷斷續續。", "協辦老師": "佘老師", "狀態": "未完成", "sheetRow": 5 }
+                    ];
+                    renderTable(mockReports);
+                    tableContainer.classList.remove('hidden');
+                    return;
+                }
+                
+                const response = await fetch(API_URL + VIEW_ENDPOINT);
+                const result = await response.json();
+
+                if (response.ok && result.status === 'success') {
+                    renderTable(result.reports);
+                    tableContainer.classList.remove('hidden');
+                } else {
+                    throw new Error(result.message || '無法從伺服器取得資料。');
+                }
+
+            } catch (error) {
+                console.error("載入紀錄失敗:", error);
+                errorBox.textContent = `載入報修紀錄失敗：${error.message} (如果您正在單獨預覽，請注意這是模擬資料)`;
+                errorBox.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+            }
+        }
+
+        // 頁面載入時執行
+        window.onload = fetchReports;
+
+    </script>
+</body>
+</html>
