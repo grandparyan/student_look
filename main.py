@@ -1,387 +1,411 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>任務接收系統</title>
-    <!-- 載入 Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* 使用 Inter 字體 */
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        /* 簡單的載入中動畫 */
-        .spinner {
-            border-top-color: theme('colors.indigo.500');
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-    </style>
-</head>
-<body class="bg-gray-100 min-h-screen">
+import os
+import json
+import gspread
+import logging
+import datetime
+from fastapi import FastAPI, Request, Depends, HTTPException, status
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional
 
-    <div id="app" class="container mx-auto p-4 md:p-8 max-w-4xl">
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import Annotated 
 
-        <!-- ===== 1. 登入畫面 ===== -->
-        <div id="login-view">
-            <div class="bg-white p-8 rounded-xl shadow-lg max-w-md mx-auto">
-                <h1 class="text-2xl font-bold text-center text-gray-800 mb-6">任務系統登入</h1>
-                <form id="login-form">
-                    <div class="mb-4">
-                        <label for="username" class="block text-sm font-medium text-gray-700 mb-1">帳號</label>
-                        <input type="text" id="username" name="username" required
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                               placeholder="請輸入您的帳號">
-                    </div>
-                    <div class="mb-6">
-                        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">密碼</label>
-                        <input type="password" id="password" name="password" required
-                               class="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                               placeholder="請輸入您的密碼">
-                    </div>
-                    <button type="submit" id="login-button"
-                            class="w-full bg-indigo-600 text-white py-2 px-4 rounded-lg font-semibold shadow-md
-                                   hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2
-                                   transition duration-200 ease-in-out
-                                   disabled:bg-gray-400 disabled:cursor-not-allowed">
-                        登入
-                    </button>
-                    <div id="login-message" class="text-center text-sm text-red-600 mt-4"></div>
-                </form>
-            </div>
-        </div>
+from oauth2client.service_account import ServiceAccountCredentials
 
-        <!-- ===== 2. 任務列表畫面 ===== -->
-        <div id="tasks-view" class="hidden">
-            <div class="bg-white p-6 md:p-8 rounded-xl shadow-lg">
-                <div class="flex justify-between items-center mb-6 border-b pb-4">
-                    <div>
-                        <h1 class="text-3xl font-bold text-gray-800">可接取的任務</h1>
-                        <p id="welcome-message" class="text-gray-600 mt-1">正在載入使用者資訊...</p>
-                    </div>
-                    <button id="logout-button"
-                            class="bg-red-500 text-white py-2 px-4 rounded-lg font-semibold shadow-md
-                                   hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2
-                                   transition duration-200 ease-in-out">
-                        登出
-                    </button>
-                </div>
+logging.basicConfig(level=logging.INFO)
 
-                <!-- 任務篩選 -->
-                <div class="mb-4">
-                    <label for="task-filter" class="sr-only">篩選任務</label>
-                    <select id="task-filter"
-                            class="w-full md:w-1/3 px-4 py-2 border border-gray-300 rounded-lg shadow-sm 
-                                   focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
-                        <option value="pending">待處理 (尚未額滿)</option>
-                        <option value="my-tasks">我已接取</option>
-                        <option value="full">已額滿</option>
-                        <option value="all">所有任務</option>
-                    </select>
-                </div>
+app = FastAPI(
+    title="設備報修與任務系統 API",
+    description="提供報修提交、任務查看與接取功能"
+)
 
-                <!-- 任務操作訊息 -->
-                <div id="task-message" class="text-center mb-4"></div>
+# --- CORS 中介軟體 ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # 允許所有來源，在生產環境中應更加嚴格
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-                <!-- 載入中提示 -->
-                <div id="loading-spinner" class="flex justify-center items-center py-10">
-                    <div class="spinner w-12 h-12 border-4 border-gray-200 border-t-indigo-500 rounded-full"></div>
-                    <p class="ml-4 text-gray-600">正在載入任務列表...</p>
-                </div>
+# --- Google Sheets 設定 ---
+spreadsheet_id = "1IHyA7aRxGJekm31KIbuORpg4-dVY8XTOEbU6p8vK3y4"
+WORKSHEET_NAME = "設備報修"
+USER_SHEET_NAME = "使用者名單" # 儲存使用者帳密的工
+scope = [
+    "https://spreadsheets.google.com/feeds",
+    'https://www.googleapis.com/auth/spreadsheets',
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive"
+]
 
-                <!-- 任務列表 -->
-                <div id="task-list" class="space-y-4">
-                    <!-- 任務卡片將會動態插入到這裡 -->
-                </div>
-            </div>
-        </div>
-    </div>
+# 從環境變數讀取 Google 憑證
+creds_json_str = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const API_BASE_URL = ''; // 部署在 Render 上，相對路徑即可
+if not creds_json_str:
+    logging.error("錯誤：未設定 'GOOGLE_CREDENTIALS_JSON' 環境變數。")
+    # 在本地開發時，可以嘗試讀取檔案
+    try:
+        with open('google_credentials.json', 'r') as f:
+            creds_json_str = f.read()
+        logging.info("成功從 'google_credentials.json' 檔案載入憑證。")
+    except FileNotFoundError:
+        logging.error("本地 'google_credentials.json' 檔案也未找到。")
+        creds_json_str = "{}" # 至少給一個空值，避免 json.loads 失敗
 
-            // --- 1. 抓取 DOM 元素 ---
-            const loginView = document.getElementById('login-view');
-            const tasksView = document.getElementById('tasks-view');
-            const loginForm = document.getElementById('login-form');
-            const loginButton = document.getElementById('login-button');
-            const loginMessage = document.getElementById('login-message');
-            
-            const welcomeMessage = document.getElementById('welcome-message');
-            const logoutButton = document.getElementById('logout-button');
-            const taskFilter = document.getElementById('task-filter');
-            const taskList = document.getElementById('task-list');
-            const taskMessage = document.getElementById('task-message');
-            const loadingSpinner = document.getElementById('loading-spinner');
+try:
+    creds_json = json.loads(creds_json_str)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+    client = gspread.authorize(creds)
+    
+    # 嘗試開啟 Google Sheet 來驗證憑證是否有效
+    try:
+        sh = client.open_by_key(spreadsheet_id)
+        worksheet = sh.worksheet(WORKSHEET_NAME)
+        user_worksheet = sh.worksheet(USER_SHEET_NAME)
+        logging.info(f"成功連接到 Google Sheet: {sh.title}")
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Google API 錯誤：無法開啟 Google Sheet。請檢查憑證權限與 Spreadsheet ID。 {e}")
+        # 這裡不 raise 異常，讓應用程式繼續啟動，但在 API 呼叫時會失敗
+    except gspread.exceptions.WorksheetNotFound as e:
+        logging.error(f"找不到工作表：{e}。請確保 '{WORKSHEET_NAME}' 和 '{USER_SHEET_NAME}' 工作表存在。")
 
-            // --- 2. 狀態變數 ---
-            let currentUser = null; // { "full_name": "...", "group": "..." }
-            let currentToken = null;
-            let allTasks = []; // 儲存所有從 API 獲取的任務
+except json.JSONDecodeError:
+    logging.error("錯誤：'GOOGLE_CREDENTIALS_JSON' 環境變數的內容不是有效的 JSON。")
+except Exception as e:
+    logging.error(f"載入 Google 憑證時發生未知錯誤: {e}")
 
-            // --- 3. 登入邏輯 ---
-            loginForm.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                loginButton.disabled = true;
-                loginButton.textContent = '登入中...';
-                loginMessage.textContent = '';
 
-                // 使用 FormData 來處理 application/x-www-form-urlencoded
-                const formData = new FormData(loginForm);
+# --- 1. 安全性與認證 (Authentication) ---
 
-                try {
-                    const response = await fetch(`${API_BASE_URL}/token`, {
-                        method: 'POST',
-                        body: new URLSearchParams(formData) // 轉換為 x-www-form-urlencoded
-                    });
+# JWT 設定
+SECRET_KEY = os.environ.get("SECRET_KEY", "your_fallback_secret_key_1234567890") # 務必在 Render 設定此環境變數
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8 # 8 小時
 
-                    const data = await response.json();
+# 密碼雜湊
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-                    if (!response.ok) {
-                        throw new Error(data.detail || '登入失敗，請檢查帳號或密碼');
-                    }
+# OAuth2
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-                    // 登入成功
-                    currentToken = data.access_token;
-                    // 從 token 中解碼使用者資訊 (注意：這僅用於顯示，不應用於安全驗證)
-                    currentUser = parseJwt(currentToken); 
-                    
-                    updateUI('tasks');
-                    welcomeMessage.textContent = `你好, ${currentUser.full_name} (${currentUser.group})。`;
-                    fetchTasks();
+# Pydantic 模型 (使用者相關)
+class User(BaseModel):
+    username: str # 帳號 (學號)
+    full_name: str # 姓名
+    group: str # 組別
+    hashed_password: str
 
-                } catch (error) {
-                    loginMessage.textContent = error.message;
-                } finally {
-                    loginButton.disabled = false;
-                    loginButton.textContent = '登入';
-                }
-            });
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
-            // --- 4. 登出邏輯 ---
-            logoutButton.addEventListener('click', () => {
-                currentUser = null;
-                currentToken = null;
-                allTasks = [];
-                taskList.innerHTML = ''; // 清空任務列表
-                loginForm.reset(); // 重設登入表單
-                updateUI('login');
-                loginMessage.textContent = '您已成功登出。';
-            });
+class TokenData(BaseModel):
+    username: Optional[str] = None
+    user_info: Optional[str] = None # 我們將把 full_name 和 group 存在這裡
 
-            // --- 5. 取得任務列表 ---
-            async function fetchTasks() {
-                if (!currentToken) return;
 
-                loadingSpinner.style.display = 'flex';
-                taskList.innerHTML = '';
-                taskMessage.textContent = '';
+# --- 輔助函式 (認證) ---
 
-                try {
-                    const response = await fetch(`${API_BASE_URL}/tasks`, {
-                        method: 'GET',
-                        headers: {
-                            'Authorization': `Bearer ${currentToken}`
-                        }
-                    });
+def get_user_from_sheet(username: str) -> Optional[User]:
+    """從 Google Sheet 中查找使用者"""
+    try:
+        user_records = user_worksheet.get_all_records()
+        for record in user_records:
+            if str(record.get('帳號')) == username:
+                return User(
+                    username=str(record.get('帳號')),
+                    full_name=str(record.get('姓名')),
+                    group=str(record.get('組別')),
+                    hashed_password=str(record.get('雜湊密碼'))
+                )
+        return None
+    except Exception as e:
+        logging.error(f"從 Google Sheet 獲取使用者時出錯: {e}")
+        return None
 
-                    if (!response.ok) {
-                        throw new Error('無法取得任務列表');
-                    }
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """驗證密碼"""
+    return pwd_context.verify(plain_password, hashed_password)
 
-                    allTasks = await response.json();
-                    filterAndRenderTasks(); // 取得任務後立即渲染
+def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None):
+    """建立 JWT Token"""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.datetime.now(datetime.timezone.utc) + expires_delta
+    else:
+        expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-                } catch (error) {
-                    taskMessage.textContent = `錯誤: ${error.message}`;
-                    taskMessage.className = 'text-center text-red-600 font-medium mb-4';
-                } finally {
-                    loadingSpinner.style.display = 'none';
-                }
-            }
+async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> User:
+    """解析 Token 並獲取當前使用者"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="無法驗證憑證",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        # 我們將使用者資訊 JSON 字串存在 'sub'
+        user_info_str = payload.get("sub") 
+        if user_info_str is None:
+            raise credentials_exception
+        
+        user_info = json.loads(user_info_str)
+        
+        # 為了向下相容 User 模型，我們需要從 user_info 填充 User
+        # 但對於 API 端點，我們只需要 full_name 和 group
+        # 這裡我們返回一個 "部分" 的 User 物件，只包含我們需要的資訊
+        return User(
+            username="N/A", # 我們不需要在後續操作中再次查詢 username
+            full_name=user_info.get("full_name"),
+            group=user_info.get("group"),
+            hashed_password="" # 不需要
+        )
 
-            // --- 6. 渲染與篩選任務 ---
-            taskFilter.addEventListener('change', filterAndRenderTasks);
+    except JWTError:
+        raise credentials_exception
+    except json.JSONDecodeError:
+        logging.error("解析 Token 中的 'sub' 欄位失敗")
+        raise credentials_exception
 
-            function filterAndRenderTasks() {
-                const filterValue = taskFilter.value;
-                let tasksToRender = [];
 
-                if (filterValue === 'pending') {
-                    tasksToRender = allTasks.filter(task => !task.is_full);
-                } else if (filterValue === 'my-tasks') {
-                    tasksToRender = allTasks.filter(task => 
-                        currentUser && task.assignees.includes(currentUser.full_name)
-                    );
-                } else if (filterValue === 'full') {
-                    tasksToRender = allTasks.filter(task => task.is_full);
-                } else { // 'all'
-                    tasksToRender = allTasks;
-                }
+# --- API 端點 (認證) ---
+
+@app.post("/token", response_model=Token)
+async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+    """
+    使用帳號 (username) 和密碼 (password) 登入以獲取 Token。
+    這是 OAuth2 標準端點，使用 x-www-form-urlencoded。
+    """
+    user = get_user_from_sheet(form_data.username)
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="不正確的帳號或密碼",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # 將使用者資訊打包成 JSON 字串存入 'sub'
+    user_info_for_token = {
+        "full_name": user.full_name,
+        "group": user.group
+    }
+    user_info_str = json.dumps(user_info_for_token)
+    
+    access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user_info_str}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/users/me", response_model=User)
+async def read_users_me(current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    獲取當前登入使用者的資訊。
+    """
+    # current_user 已經是從 Token 解碼出來的 User 物件
+    return current_user
+
+
+# --- 2. 任務系統 (Task System) ---
+
+# Pydantic 模型 (任務相關)
+class Task(BaseModel):
+    row_number: int
+    group: str
+    title: str
+    description: str
+    status: str
+    required_count: int
+    assignees: List[str]
+    is_full: bool
+    
+class TaskAssignRequest(BaseModel):
+    row_number: int
+
+
+# --- API 端點 (任務) ---
+
+@app.get("/tasks", response_model=List[Task])
+async def get_all_tasks(current_user: Annotated[User, Depends(get_current_user)]):
+    """
+    獲取所有任務列表。僅限登入使用者訪問。
+    """
+    try:
+        # 重新獲取 worksheet 物件以確保連線是最新的
+        sh = client.open_by_key(spreadsheet_id)
+        worksheet = sh.worksheet(WORKSHEET_NAME)
+        
+        # 獲取標題行（A1:F1）
+        header = worksheet.row_values(1)
+        # 假設標題在 A 欄到 F 欄
+        # A=組別, B=標題, C=描述, D=狀態, E=需求人數, F=已接取人員
+        
+        # 獲取第2行及之後的所有資料
+        all_data_rows = worksheet.get_all_values()[1:] # 跳過標題行
+        
+        tasks = []
+        for i, row in enumerate(all_data_rows):
+            if not any(row): # 略過空行
+                continue
                 
-                renderTasks(tasksToRender);
-            }
+            row_number = i + 2 # Google Sheet 的行號是從 1 開始，且我們跳過了標題
             
-            function renderTasks(tasks) {
-                taskList.innerHTML = ''; // 清空當前列表
+            try:
+                # 確保欄位存在，否則給予預設值
+                group = row[0] if len(row) > 0 else "N/A"
+                title = row[1] if len(row) > 1 else "N/A"
+                description = row[2] if len(row) > 2 else ""
+                status = row[3] if len(row) > 3 else "待處理"
                 
-                if (tasks.length === 0) {
-                    taskList.innerHTML = `<p class="text-gray-500 text-center py-4">這個分類中沒有任務。</p>`;
-                    return;
-                }
+                # 處理需求人數
+                try:
+                    required_count = int(row[4]) if len(row) > 4 and row[4] else 1
+                except ValueError:
+                    required_count = 1 # 如果 E 欄不是數字，預設為 1
+                
+                # 處理已接取人員
+                assignees_str = row[5] if len(row) > 5 else ""
+                assignees = [name.strip() for name in assignees_str.split(';') if name.strip()]
+                
+                is_full = len(assignees) >= required_count
+                
+                tasks.append(Task(
+                    row_number=row_number,
+                    group=group,
+                    title=title,
+                    description=description,
+                    status=status,
+                    required_count=required_count,
+                    assignees=assignees,
+                    is_full=is_full
+                ))
+            except Exception as e:
+                logging.error(f"解析 Google Sheet 第 {row_number} 行時出錯: {e} - 資料: {row}")
 
-                tasks.forEach(task => {
-                    // *** 修正開始 (使用 assignees) ***
-                    const isAlreadyAccepted = currentUser ? task.assignees.includes(currentUser.full_name) : false;
-                    const peopleNeeded = task.required_count - task.assignees.length;
-                    // *** 修正結束 ***
+        return tasks
 
-                    let buttonHtml = '';
-                    if (isAlreadyAccepted) {
-                        buttonHtml = `
-                            <button class="bg-gray-400 text-white py-2 px-5 rounded-lg font-semibold cursor-not-allowed" disabled>
-                                已接取
-                            </button>`;
-                    } else if (task.is_full) {
-                        buttonHtml = `
-                            <button class="bg-gray-400 text-white py-2 px-5 rounded-lg font-semibold cursor-not-allowed" disabled>
-                                已額滿
-                            </button>`;
-                    } else {
-                        buttonHtml = `
-                            <button data-row-id="${task.row_number}"
-                                    class="accept-task-btn bg-indigo-600 text-white py-2 px-5 rounded-lg font-semibold 
-                                           hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500
-                                           transition duration-200 ease-in-out">
-                                接取任務
-                            </button>`;
-                    }
-                    
-                    const card = `
-                        <div class="border border-gray-200 rounded-lg p-5 bg-white shadow-sm transition-all hover:shadow-md">
-                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center">
-                                <!-- 任務資訊 -->
-                                <div class="mb-4 md:mb-0">
-                                    <span class="inline-block bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-1 rounded-full mb-2">
-                                        ${task.group}
-                                    </span>
-                                    <h3 class="text-xl font-bold text-gray-800">${task.title}</h3>
-                                    <p class="text-gray-600 mt-1">${task.description}</p>
-                                    <p class="text-sm text-gray-500 mt-2">
-                                        <span class="font-medium">狀態:</span> ${task.status} | 
-                                        <span class="font-medium">任務編號:</span> ${task.row_number}
-                                    </p>
-                                </div>
-                                
-                                <!-- 人數與按鈕 -->
-                                <div class="flex-shrink-0 w-full md:w-auto text-left md:text-right">
-                                    <!-- *** 修正開始 (使用 assignees) *** -->
-                                    <div class="text-right mb-3">
-                                        <p class="text-sm font-semibold ${peopleNeeded > 0 ? 'text-indigo-600' : 'text-gray-600'}">
-                                            ${task.is_full ? '人數已滿' : `尚缺 ${peopleNeeded} 人`}
-                                            <span class="text-xs text-gray-500 font-normal">(${task.assignees.length} / ${task.required_count})</span>
-                                        </p>
-                                        <p class="text-xs text-gray-500 mt-1">
-                                            ${task.assignees.length > 0 ? '接取者: ' + task.assignees.join(', ') : '尚無人接取'}
-                                        </p>
-                                    </div>
-                                    <!-- *** 修正結束 *** -->
-                                    ${buttonHtml}
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    taskList.innerHTML += card;
-                });
-            }
-
-            // --- 7. 接取任務邏輯 ---
-            taskList.addEventListener('click', async (e) => {
-                // 事件委派：只處理 .accept-task-btn 的點擊
-                const button = e.target.closest('.accept-task-btn');
-                if (!button) return;
-
-                button.disabled = true;
-                button.textContent = '處理中...';
-                taskMessage.textContent = '';
-
-                const rowId = button.dataset.rowId;
-
-                try {
-                    // *** 修正開始 (API 路徑與 body) ***
-                    const response = await fetch(`${API_BASE_URL}/tasks/assign`, {
-                        method: 'POST',
-                        headers: { 
-                            'Authorization': `Bearer ${currentToken}`,
-                            'Content-Type': 'application/json' 
-                        },
-                        body: JSON.stringify({
-                            "row_number": parseInt(rowId) // 傳送後端要的 row_number
-                        })
-                    });
-                    // *** 修正結束 ***
-
-                    const result = await response.json();
-                    
-                    if (!response.ok) {
-                        throw new Error(result.detail || '接取失敗');
-                    }
-
-                    // 接取成功！
-                    taskMessage.textContent = result.message || '任務接取成功！';
-                    taskMessage.className = 'text-center text-green-600 font-medium mb-4';
-                    
-                    // 重新整理任務列表
-                    fetchTasks(); 
-
-                } catch (error) {
-                    console.error('接取任務失敗:', error);
-                    taskMessage.textContent = `錯誤: ${error.message}`;
-                    taskMessage.className = 'text-center text-red-600 font-medium mb-4';
-                    button.disabled = false; // 讓使用者可以重試
-                    button.textContent = '接取任務';
-                }
-            });
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Gspread API 錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"Google Sheets API 錯誤: {e}")
+    except Exception as e:
+        logging.error(f"獲取任務時發生未知錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"獲取任務時發生內部錯誤: {e}")
 
 
-            // --- 8. 更新 UI 畫面 (登入/任務) ---
-            function updateUI(view) {
-                if (view === 'tasks') {
-                    loginView.classList.add('hidden');
-                    tasksView.classList.remove('hidden');
-                } else {
-                    // 'login'
-                    loginView.classList.remove('hidden');
-                    tasksView.classList.add('hidden');
-                }
-            }
-            
-            // --- 輔助函式：解析 JWT ---
-            function parseJwt(token) {
-                try {
-                    const base64Url = token.split('.')[1];
-                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-                        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                    }).join(''));
-                    
-                    // JWT payload 儲存在 'sub' 欄位中，格式為 '{"full_name": ..., "group": ...}'
-                    const payload = JSON.parse(json.parse(jsonPayload).sub);
-                    return payload;
-                } catch (e) {
-                    console.error("解析 Token 失敗:", e);
-                    return null;
-                }
-            }
+@app.post("/tasks/assign", response_model=Task)
+async def assign_task_to_user(
+    request: TaskAssignRequest,
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    """
+    將當前使用者指派到一個任務。
+    """
+    row_number = request.row_number
+    user_full_name = current_user.full_name
+    
+    try:
+        # 重新獲取 worksheet 物件
+        sh = client.open_by_key(spreadsheet_id)
+        worksheet = sh.worksheet(WORKSHEET_NAME)
+
+        # 1. 讀取該行的資料
+        try:
+            row_data = worksheet.row_values(row_number)
+            if not any(row_data):
+                raise HTTPException(status_code=404, detail="找不到該任務 (行號不存在或為空)")
+        except gspread.exceptions.APIError as e:
+            if "RANGE_NOT_FOUND" in str(e):
+                raise HTTPException(status_code=404, detail=f"找不到行號為 {row_number} 的任務")
+            raise e
+
+        # 2. 解析資料 (與 /tasks 端點邏輯一致)
+        # A=組別(0), B=標題(1), C=描述(2), D=狀態(3), E=需求人數(4), F=已接取人員(5)
+        
+        # 處理需求人數
+        try:
+            required_count = int(row_data[4]) if len(row_data) > 4 and row_data[4] else 1
+        except ValueError:
+            required_count = 1
+        
+        # 處理已接取人員
+        assignees_str = row_data[5] if len(row_data) > 5 else ""
+        assignees = [name.strip() for name in assignees_str.split(';') if name.strip()]
+
+        # 3. 檢查邏輯
+        if user_full_name in assignees:
+            raise HTTPException(status_code=400, detail="您已經接取過此任務")
+
+        if len(assignees) >= required_count:
+            raise HTTPException(status_code=400, detail="此任務人數已滿，無法接取")
+
+        # 4. 更新資料
+        assignees.append(user_full_name)
+        new_assignees_str = "; ".join(assignees)
+        
+        # 檢查是否額滿並更新狀態
+        new_status = row_data[3] if len(row_data) > 3 else "待處理" # 保持原狀態
+        if len(assignees) >= required_count:
+            new_status = "已額滿" # 如果接取後剛好額滿，更新狀態
+
+        # 5. 寫回 Google Sheet
+        # 更新 F 欄 (已接取人員) 和 D 欄 (狀態)
+        worksheet.update_cell(row_number, 6, new_assignees_str) # F 欄 (第6欄)
+        worksheet.update_cell(row_number, 4, new_status)        # D 欄 (第4欄)
+
+        # 6. 返回更新後的任務狀態
+        return Task(
+            row_number=row_number,
+            group=row_data[0],
+            title=row_data[1],
+            description=row_data[2],
+            status=new_status,
+            required_count=required_count,
+            assignees=assignees,
+            is_full=True if new_status == "已額滿" else False
+        )
+
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Gspread API 錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"Google Sheets API 錯誤: {e}")
+    except Exception as e:
+        logging.error(f"接取任務時發生未知錯誤: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"接取任務時發生內部錯誤: {e}")
 
 
-            // --- 初始啟動 ---
-            updateUI('login'); // 預設顯示登入畫面
-        });
-    </script>
-</body>
-</html>
+# --- 3. 託管靜態檔案 (HTML/CSS/JS) ---
+
+@app.get("/")
+async def read_root():
+    """
+    提供前端 index.html 檔案。
+    """
+    try:
+        return FileResponse("index.html")
+    except FileNotFoundError:
+        logging.error("index.html 未找到。")
+        return JSONResponse(
+            content={"error": "找不到前端介面檔案 (index.html)。"},
+            status_code=404
+        )
+    except Exception as e:
+        logging.error(f"讀取 index.html 時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail="無法讀取介面檔案")
+
+# --- (可選) 密碼產生器，僅供管理員使用 ---
+# 註解掉此端點，避免安全風險
+# @app.get("/hash_password")
+# async def hash_password(password: str):
+#     """
+#     (開發用) 產生密碼雜湊值。
+#     """
+#     return {"hashed_password": pwd_context.hash(password)}
