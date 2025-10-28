@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>任務接取系統</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Inter 字體 -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+    <style>
+        /* 使用 Inter 字體 */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* 隱藏視圖的通用樣式 */
+        .view {
+            display: none;
+        }
+        /* 當前活動視圖的樣式 */
+        .view.active {
+            display: block;
+        }
+        /* 訊息框樣式 */
+        #messageBox {
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <!-- 主容器 -->
+    <div class="bg-white p-8 rounded-2xl shadow-xl max-w-4xl w-full">
+
+        <!-- 登入視圖 -->
+        <div id="loginView" class="view active">
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">任務系統登入</h1>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label for="loginEmail" class="block text-sm font-medium text-gray-700">帳號 (Email)</label>
+                    <input type="email" id="loginEmail" required class="mt-1 block w-full px-4 py-3 bg-gray-50 border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <div>
+                    <label for="loginPassword" class="block text-sm font-medium text-gray-700">密碼</label>
+                    <input type="password" id="loginPassword" required class="mt-1 block w-full px-4 py-3 bg-gray-50 border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200">
+                    登入
+                </button>
+            </form>
+            <p class="text-center text-sm text-gray-600 mt-6">
+                還沒有帳號？
+                <button id="showSignupBtn" class="font-medium text-blue-600 hover:text-blue-500">
+                    點此註冊
+                </button>
+            </p>
+        </div>
+
+        <!-- 註冊視圖 -->
+        <div id="signupView" class="view">
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">註冊新帳號</h1>
+            <form id="signupForm" class="space-y-4">
+                <div>
+                    <label for="signupName" class="block text-sm font-medium text-gray-700">顯示名稱 (您要顯示在任務上的名字)</label>
+                    <input type="text" id="signupName" required class="mt-1 block w-full px-4 py-3 bg-gray-50 border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <div>
+                    <label for="signupEmail" class="block text-sm font-medium text-gray-700">帳號 (Email)</label>
+                    <input type="email" id="signupEmail" required class="mt-1 block w-full px-4 py-3 bg-gray-50 border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <div>
+                    <label for="signupPassword" class="block text-sm font-medium text-gray-700">密碼 (至少 6 位數)</label>
+                    <input type="password" id="signupPassword" required minlength="6" class="mt-1 block w-full px-4 py-3 bg-gray-50 border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                </div>
+                <button type="submit" class="w-full bg-green-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition duration-200">
+                    註冊
+                </button>
+            </form>
+            <p class="text-center text-sm text-gray-600 mt-6">
+                已經有帳號了？
+                <button id="showLoginBtn" class="font-medium text-blue-600 hover:text-blue-500">
+                    點此登入
+                </button>
+            </p>
+        </div>
+
+        <!-- 任務列表視圖 -->
+        <div id="taskView" class="view">
+            <div class="flex justify-between items-center mb-6">
+                <h1 id="welcomeMessage" class="text-2xl font-bold text-gray-800">歡迎！</h1>
+                <button id="logoutBtn" class="bg-red-500 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition duration-200">
+                    登出
+                </button>
+            </div>
+            
+            <h2 class="text-2xl font-semibold text-gray-700 mb-4">待處理任務</h2>
+            
+            <!-- 任務列表容器 -->
+            <div id="taskList" class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+                <!-- 任務卡片將會動態插入到這裡 -->
+                <!-- 範例卡片結構:
+                <div class="bg-gray-50 p-5 rounded-lg shadow-md border border-gray-200">
+                    <h3 class="text-xl font-semibold text-gray-900">任務標題</h3>
+                    <p class="text-gray-600 mt-2">任務描述...</p>
+                    <div class="mt-4">
+                        <span class="text-sm font-medium text-gray-700">狀態：</span>
+                        <span class="text-sm font-bold text-blue-600">3 / 5 人</span>
+                    </div>
+                    <div class="mt-2">
+                        <span class="text-sm font-medium text-gray-700">已接取：</span>
+                        <span class="text-sm text-gray-800">張三, 李四, 王五</span>
+                    </div>
+                    <div class="mt-5 text-right">
+                        <button class="accept-btn bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-blue-700 ...">
+                            接取任務
+                        </button>
+                    </div>
+                </div>
+                -->
+            </div>
+            
+            <!-- (可選) 新增任務按鈕 - 方便您測試 -->
+            <button id="addSampleTaskBtn" class="mt-6 w-full bg-gray-300 text-gray-700 font-semibold py-2 px-5 rounded-lg hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 transition duration-200">
+                (僅供測試) 新增範例任務
+            </button>
+        </div>
+
+    </div>
+
+    <!-- 全局訊息框 -->
+    <div id="messageBox" class="fixed top-5 right-5 bg-red-500 text-white py-3 px-6 rounded-lg shadow-xl opacity-0 transform -translate-y-10 scale-95 pointer-events-none">
+        <span id="messageText"></span>
+        <button id="closeMessageBtn" class="ml-4 font-bold text-lg">&times;</button>
+    </div>
+
+    <!-- Firebase SDK 引入 -->
+    <script type="module">
+        // 匯入 Firebase 模組
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth, 
+            onAuthStateChanged, 
+            createUserWithEmailAndPassword, 
+            signInWithEmailAndPassword, 
+            signOut, 
+            updateProfile,
+            signInAnonymously,
+            signInWithCustomToken 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore, 
+            collection, 
+            doc, 
+            addDoc, 
+            onSnapshot, 
+            runTransaction,
+            setLogLevel
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- 全局變數 ---
+        let db, auth, currentUser = null, tasksListener = null;
+        
+        // 取得 Canvas 環境變數
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-task-app';
+        
+        // **[FIX]** 增強 JSON 解析的穩健性，防止 __firebase_config 為空字串時出錯
+        const rawConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        const firebaseConfig = JSON.parse(rawConfig || '{}');
+        
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // --- DOM 元素 ---
+        const loginView = document.getElementById('loginView');
+        const signupView = document.getElementById('signupView');
+        const taskView = document.getElementById('taskView');
+        const messageBox = document.getElementById('messageBox');
+        const messageText = document.getElementById('messageText');
+
+        // --- 初始化函數 ---
+        document.addEventListener('DOMContentLoaded', initApp);
+
+        async function initApp() {
+            try {
+                // 1. 初始化 Firebase
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug'); // 開啟 Firestore 詳細日誌
+
+                // 2. 登入 Firebase 後端 (使用 Canvas 提供的 Token 或匿名)
+                // 這一步是為了讓 *網頁本身* 擁有讀寫 Firestore 的權限
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Firebase session authenticated with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Firebase session authenticated anonymously.");
+                }
+
+                // 3. 監聽 *使用者* 的登入狀態 (Email/Password)
+                onAuthStateChanged(auth, (user) => {
+                    // 我們要忽略匿名登入的狀態，只關心真正的使用者
+                    if (user && !user.isAnonymous) {
+                        currentUser = user;
+                        document.getElementById('welcomeMessage').textContent = `歡迎, ${user.displayName || user.email}!`;
+                        showView('taskView');
+                        loadTasks(); // 載入並監聽任務
+                    } else {
+                        currentUser = null;
+                        showView('loginView');
+                        clearTasks(); // 停止監聽任務
+                    }
+                });
+
+                // 4. 綁定事件監聽器
+                setupEventListeners();
+
+            } catch (error) {
+                console.error("Firebase 初始化失敗:", error);
+                showError("系統初始化失敗，請刷新頁面。");
+            }
+        }
+
+        function setupEventListeners() {
+            // 表單提交
+            document.getElementById('loginForm').addEventListener('submit', handleLogin);
+            document.getElementById('signupForm').addEventListener('submit', handleSignup);
+            
+            // 按鈕點擊
+            document.getElementById('logoutBtn').addEventListener('click', handleLogout);
+            document.getElementById('showSignupBtn').addEventListener('click', () => showView('signupView'));
+            document.getElementById('showLoginBtn').addEventListener('click', () => showView('loginView'));
+            document.getElementById('closeMessageBtn').addEventListener('click', hideError);
+            
+            // 測試按鈕
+            document.getElementById('addSampleTaskBtn').addEventListener('click', addSampleTasks);
+
+            // 任務列表事件代理 (用於點擊 "接取" 按鈕)
+            document.getElementById('taskList').addEventListener('click', (e) => {
+                if (e.target && e.target.classList.contains('accept-btn')) {
+                    const taskId = e.target.dataset.taskId;
+                    handleAcceptTask(taskId);
+                }
+            });
+        }
+
+        // --- 視圖管理 ---
+        function showView(viewId) {
+            document.querySelectorAll('.view').forEach(view => {
+                view.classList.remove('active');
+            });
+            document.getElementById(viewId).classList.add('active');
+        }
+
+        // --- 身份驗證 ---
+        async function handleLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+                // onAuthStateChanged 會自動處理後續
+            } catch (error) {
+                showError(getFriendlyErrorMessage(error));
+            }
+        }
+
+        async function handleSignup(e) {
+            e.preventDefault();
+            const displayName = document.getElementById('signupName').value;
+            const email = document.getElementById('signupEmail').value;
+            const password = document.getElementById('signupPassword').value;
+
+            if (!displayName.trim()) {
+                showError("請輸入顯示名稱。");
+                return;
+            }
+
+            try {
+                // 1. 創建使用者
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                
+                // 2. 更新使用者的顯示名稱
+                await updateProfile(userCredential.user, {
+                    displayName: displayName
+                });
+                
+                // 刷新 currentUser (雖然 onAuthStateChanged 也會觸發，但手動更新能確保 displayName 立即生效)
+                currentUser = auth.currentUser; 
+                
+                // onAuthStateChanged 會自動切換視圖
+                console.log("註冊成功並已更新個人資料。");
+
+            } catch (error) {
+                showError(getFriendlyErrorMessage(error));
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await signOut(auth);
+                // onAuthStateChanged 會自動處理
+            } catch (error) {
+                showError(getFriendlyErrorMessage(error));
+            }
+        }
+
+        // --- 任務 (Firestore) 邏輯 ---
+
+        // 獲取 "public" 任務集合的路徑
+        function getTasksCollectionRef() {
+            return collection(db, `artifacts/${appId}/public/data/tasks`);
+        }
+
+        // 載入並監聽任務
+        function loadTasks() {
+            // 如果已經在監聽，先停止
+            if (tasksListener) {
+                tasksListener();
+            }
+
+            const tasksRef = getTasksCollectionRef();
+            // 設置即時監聽
+            tasksListener = onSnapshot(tasksRef, (snapshot) => {
+                const taskListEl = document.getElementById('taskList');
+                taskListEl.innerHTML = ''; // 清空列表
+                
+                if (snapshot.empty) {
+                    taskListEl.innerHTML = '<p class="text-gray-500 text-center">目前沒有任務。</p>';
+                    return;
+                }
+
+                snapshot.docs.forEach(doc => {
+                    renderTask(doc.id, doc.data());
+                });
+            }, (error) => {
+                console.error("讀取任務失敗:", error);
+                showError("無法載入任務列表。");
+            });
+        }
+
+        // 停止監聽並清空列表
+        function clearTasks() {
+            if (tasksListener) {
+                tasksListener(); // 停止監聽
+                tasksListener = null;
+            }
+            document.getElementById('taskList').innerHTML = ''; // 清空
+        }
+
+        // 渲染單個任務卡片
+        function renderTask(taskId, task) {
+            const taskListEl = document.getElementById('taskList');
+            const card = document.createElement('div');
+            card.className = "bg-white p-5 rounded-lg shadow-md border border-gray-200 transition-all hover:shadow-lg";
+
+            const assignees = task.assignees || []; // 負責人名單 (G-K欄)
+            const required = task.requiredPeople || 0; // 需要人數 (F欄)
+            const currentCount = assignees.length;
+            
+            const isFull = currentCount >= required;
+            const alreadyAccepted = currentUser ? assignees.includes(currentUser.displayName) : false;
+
+            let buttonHtml = '';
+            if (alreadyAccepted) {
+                buttonHtml = '<span class="text-green-600 font-semibold py-2 px-5">您已接取</span>';
+            } else if (isFull) {
+                buttonHtml = `
+                    <button disabled class="bg-gray-400 text-white font-semibold py-2 px-5 rounded-lg cursor-not-allowed">
+                        人數已滿
+                    </button>`;
+            } else {
+                buttonHtml = `
+                    <button data-task-id="${taskId}" class="accept-btn bg-blue-600 text-white font-semibold py-2 px-5 rounded-lg shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition duration-200">
+                        接取任務
+                    </button>`;
+            }
+
+            card.innerHTML = `
+                <h3 class="text-xl font-semibold text-gray-900">${task.title || '無標題'}</h3>
+                <p class="text-gray-600 mt-2">${task.description || '無描述'}</p>
+                <div class="mt-4">
+                    <span class="text-sm font-medium text-gray-700">狀態：</span>
+                    <span class="text-sm font-bold ${isFull ? 'text-red-600' : 'text-blue-600'}">
+                        ${currentCount} / ${required} 人
+                    </span>
+                </div>
+                <div class="mt-2">
+                    <span class="text-sm font-medium text-gray-700">已接取人員：</span>
+                    <span class="text-sm text-gray-800">
+                        ${assignees.length > 0 ? assignees.join('、') : '尚無人接取'}
+                    </span>
+                </div>
+                <div class="mt-5 text-right">
+                    ${buttonHtml}
+                </div>
+            `;
+            taskListEl.appendChild(card);
+        }
+
+        // 處理接取任務 (使用 Transaction)
+        async function handleAcceptTask(taskId) {
+            if (!currentUser || !currentUser.displayName) {
+                showError("無法獲取您的用戶名稱，請嘗試重新登入。");
+                return;
+            }
+
+            const userName = currentUser.displayName;
+            const taskRef = doc(db, `artifacts/${appId}/public/data/tasks`, taskId);
+
+            try {
+                // 使用 Transaction 來確保資料一致性
+                await runTransaction(db, async (transaction) => {
+                    const taskDoc = await transaction.get(taskRef);
+                    if (!taskDoc.exists()) {
+                        throw new Error("任務不存在或已被刪除。");
+                    }
+
+                    const taskData = taskDoc.data();
+                    const assignees = taskData.assignees || [];
+                    const required = taskData.requiredPeople || 0;
+
+                    // 檢查是否已接取
+                    if (assignees.includes(userName)) {
+                        console.warn("您已經接取過此任務。");
+                        // 不需要拋出錯誤，直接返回
+                        return; 
+                    }
+
+                    // 檢查是否已滿 (這就是您要的 F 欄 = G-K 欄數量)
+                    if (assignees.length >= required) {
+                        throw new Error("此任務人數已滿！");
+                    }
+
+                    // 執行更新
+                    const newAssignees = [...assignees, userName];
+                    transaction.update(taskRef, { assignees: newAssignees });
+                });
+
+                console.log(`[${userName}] 成功接取任務 [${taskId}]`);
+                showError("接取成功！", "success"); // 使用 "success" 樣式
+
+            } catch (error) {
+                console.error("接取任務失敗:", error);
+                showError(`接取失敗：${error.message}`);
+            }
+        }
+
+        // (測試用) 新增範例任務
+        async function addSampleTasks() {
+            const tasksRef = getTasksCollectionRef();
+            try {
+                await addDoc(tasksRef, {
+                    title: "場地佈置 (週五下午)",
+                    description: "協助搬運桌椅及貼海報。",
+                    requiredPeople: 3, // 需要 3 人 (F欄)
+                    assignees: ["範例用戶A"] // (G欄)
+                });
+                await addDoc(tasksRef, {
+                    title: "器材清點 (週五晚上)",
+                    description: "清點並歸還所有借用的器材。",
+                    requiredPeople: 2, // 需要 2 人 (F欄)
+                    assignees: [] // (G欄)
+                });
+                showError("已新增範例任務。", "success");
+            } catch (error) {
+                showError("新增範例任務失敗。");
+            }
+        }
+
+
+        // --- 錯誤處理 ---
+        function getFriendlyErrorMessage(error) {
+            switch (error.code) {
+                case 'auth/invalid-email':
+                    return 'Email 格式不正確。';
+                case 'auth/user-not-found':
+                    return '找不到此帳號。';
+                case 'auth/wrong-password':
+                    return '密碼錯誤。';
+                case 'auth/email-already-in-use':
+                    // **[FIX]** 修正簡體字
+                    return '這個 Email 已經被註冊了。';
+                case 'auth/weak-password':
+                    return '密碼強度不足 (至少 6 位數)。';
+                default:
+                    return error.message;
+            }
+        }
+
+        function showError(message, type = 'error') {
+            messageText.textContent = message;
+            
+            // K據類型切換顏色
+            if (type === 'success') {
+                messageBox.classList.remove('bg-red-500');
+                messageBox.classList.add('bg-green-500');
+            } else {
+                messageBox.classList.remove('bg-green-500');
+                messageBox.classList.add('bg-red-500');
+            }
+
+            messageBox.classList.remove('opacity-0', '-translate-y-10', 'scale-95', 'pointer-events-none');
+            
+            // 5 秒後自動隱藏
+            setTimeout(hideError, 5000);
+        }
+
+        function hideError() {
+            messageBox.classList.add('opacity-0', '-translate-y-10', 'scale-95', 'pointer-events-none');
+        }
+
+    </script>
+
+</body>
+</html>
+
