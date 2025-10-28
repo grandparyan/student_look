@@ -401,3 +401,10 @@ async def read_root():
         logging.error(f"讀取 index.html 時發生錯誤: {e}")
         raise HTTPException(status_code=500, detail="無法讀取介面檔案")
 
+
+ @app.get("/hash_password")
+ async def hash_password(password: str):
+     """
+     (開發用) 產生密碼雜湊值。
+     """
+     return {"hashed_password": pwd_context.hash(password)}
