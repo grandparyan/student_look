@@ -49,115 +49,196 @@ spreadsheet_id = "1IHyA7aRxGJekm31KIbuORpg4-dVY8XTOEbU6p8vK3y4"
 WORKSHEET_NAME = "設備報修"
 scope = [
     "https://spreadsheets.google.com/feeds",
-    "https://www.googleapis.com/auth/drive",
+    'https://www.googleapis.com/auth/spreadsheets',
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive"
 ]
 
-# 全域變數
-client = None
-sheet = None
+# 從環境變數讀取 Google 憑證 (Heroku/Render 推薦)
+creds_json_str = os.environ.get('GOOGLE_CREDENTIALS_JSON')
 
-def initialize_gspread():
-    """初始化 Google Sheets 連線。"""
-    global client, sheet
-    if client:
-        logging.info("Gspread client 已初始化。")
-        return True
-
+if not creds_json_str:
+    logging.error("錯誤：未設定 'GOOGLE_CREDENTIALS_JSON' 環境變數。")
+    # 在本地開發時，可以選擇從檔案讀取
+    # try:
+    #     with open('credentials.json', 'r') as f:
+    #         creds_json = json.load(f)
+    #     logging.info("本地開發：從 credentials.json 載入憑證。")
+    # except FileNotFoundError:
+    #     logging.error("本地開發錯誤：找不到 credentials.json 檔案。")
+    #     creds_json = {} # 避免啟動失敗
+    creds_json = {}
+else:
     try:
-        creds_json_str = os.environ.get('SERVICE_ACCOUNT_CREDENTIALS')
-        if not creds_json_str:
-            logging.error("致命錯誤：找不到 SERVICE_ACCOUNT_CREDENTIALS 環境變數。")
-            return False
+        creds_json = json.loads(creds_json_str)
+        logging.info("成功從環境變數載入 Google 憑證。")
+    except json.JSONDecodeError as e:
+        logging.error(f"解析 GOOGLE_CREDENTIALS_JSON 失敗: {e}")
+        creds_json = {}
 
-        creds_dict = json.loads(creds_json_str)
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
-        spreadsheet = client.open_by_key(spreadsheet_id)
-        sheet = spreadsheet.worksheet(WORKSHEET_NAME)
-        logging.info("Google Sheets 連線成功並獲取工作表。")
-        return True
-    except gspread.exceptions.SpreadsheetNotFound:
-        logging.error(f"錯誤：找不到 ID 為 '{spreadsheet_id}' 的試算表。")
-        return False
-    except gspread.exceptions.WorksheetNotFound:
-        logging.error(f"錯誤：在試算表中找不到名稱為 '{WORKSHEET_NAME}' 的工作表。")
-        return False
-    except Exception as e:
-        logging.error(f"初始化 Gspread 時發生未預期的錯誤: {e}")
-        return False
-
-# 在 FastAPI 啟動時執行初始化
-@app.on_event("startup")
-def startup_event():
-    if not initialize_gspread():
-        logging.warning("應用程式啟動，但 Google Sheets 連線失敗。API 可能無法正常運作。")
+try:
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+    client = gspread.authorize(creds)
+    sheet = client.open_by_key(spreadsheet_id)
+    logging.info("Google Sheets 連線成功。")
+except Exception as e:
+    logging.error(f"Google Sheets 連線失敗: {e}")
+    # 讓應用程式繼續執行，但在 API 呼叫時會失敗
+    client = None
+    sheet = None
 
 def get_sheet():
-    """依賴項：獲取 Google Sheet 工作表物件"""
-    if sheet is None:
-        logging.warning("Sheet 未初始化，嘗試重新連線...")
-        if not initialize_gspread():
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="無法連線至 Google Sheets 服務。"
-            )
-    return sheet
+    """ 依賴項：獲取 Google Sheet 工作表 """
+    global client, sheet, creds, creds_json, scope, spreadsheet_id, WORKSHEET_NAME
+    
+    if not client or not sheet:
+        logging.warning("Gspread client 未初始化，嘗試重新連線...")
+        try:
+            if not creds_json:
+                raise Exception("缺少 Google 憑證資料")
+            creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_json, scope)
+            client = gspread.authorize(creds)
+            sheet = client.open_by_key(spreadsheet_id)
+            logging.info("Gspread 重新連線成功。")
+        except Exception as e:
+            logging.error(f"Gspread 重新連線失敗: {e}")
+            raise HTTPException(status_code=503, detail=f"無法連線至 Google Sheets: {e}")
+
+    try:
+        # 檢查憑證是否過期，如果過期則刷新
+        if creds.access_token_expired:
+            logging.info("Google 憑證已過期，正在刷新...")
+            client.login()
+        
+        current_sheet = sheet.worksheet(WORKSHEET_NAME)
+        return current_sheet
+    except gspread.exceptions.WorksheetNotFound:
+        logging.error(f"找不到工作表: {WORKSHEET_NAME}")
+        raise HTTPException(status_code=500, detail=f"找不到工作表: {WORKSHEET_NAME}")
+    except Exception as e:
+        logging.error(f"獲取工作表時發生錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"獲取工作表時發生錯誤: {e}")
+
 
 # =======================================================================
-# 認證 (Authentication) 設定
+# 1. 靜態檔案服務 (HTML/CSS/JS)
 # =======================================================================
 
-# --- 安全性設定 ---
-# 讀取環境變數，若不存在則使用一個預設值（警告：生產環境中應*必定*設定環境變數）
-SECRET_KEY = os.environ.get("SECRET_KEY", "a_very_insecure_default_secret_key_CHANGE_ME")
+@app.get("/")
+async def read_index():
+    """ 提供 index.html """
+    return FileResponse('index.html')
+
+# =======================================================================
+# 2. 報修提交 API (公開)
+# =======================================================================
+class Report(BaseModel):
+    reporter: str
+    location: str
+    description: str
+
+@app.post("/submit_report")
+async def submit_report(report: Report, current_sheet: gspread.Worksheet = Depends(get_sheet)):
+    """
+    接收設備報修表單提交，並將其寫入 Google Sheet。
+    """
+    try:
+        # A 欄：時間戳記
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # B 欄：報修人
+        reporter = report.reporter
+        # C 欄：地點
+        location = report.location
+        # D 欄：狀況描述
+        description = report.description
+        # E 欄：狀態 (預設為 "待處理")
+        status = "待處理"
+        # F 欄：所需人數 (預設為 1)
+        required_count = 1
+        
+        new_row = [timestamp, reporter, location, description, status, required_count]
+        
+        # 插入到第二行 (標題行之後)
+        current_sheet.insert_row(new_row, 2) 
+        
+        logging.info(f"新增報修: {new_row}")
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={"message": "報修提交成功！", "data": new_row}
+        )
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Gspread API 錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"Google Sheets API 錯誤: {e.s}")
+    except Exception as e:
+        logging.error(f"提交報修時發生未知錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
+
+# =======================================================================
+# 3. 認證系統 (JWT)
+# =======================================================================
+
+# --- 設定 ---
+SECRET_KEY = os.environ.get("SECRET_KEY", "a_very_secret_key_that_should_be_changed")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8 # 8 小時
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# --- 資料模型 (Pydantic Models) ---
+# --- 資料模型 ---
+class User(BaseModel):
+    username: str
+    full_name: str
+    disabled: bool = False
+    
+class UserInDB(User):
+    hashed_password: str
+
 class Token(BaseModel):
     access_token: str
     token_type: str
 
 class TokenData(BaseModel):
     username: Optional[str] = None
-    full_name: Optional[str] = None # 我們將儲存全名在 token 中
 
-class User(BaseModel):
-    username: str
-    full_name: str
-    disabled: Optional[bool] = None
-
-class UserInDB(User):
-    hashed_password: str
-
-# --- 模擬使用者資料庫 ---
-# 在這裡加入你的使用者帳號、全名和雜湊後的密碼
-# !! 注意: 'pass123' 的雜湊值是 '$2b$12$Ea.Rhv4jQ5suPb4XAGYfruj.6kXlHqNiyN1uGkCYgVvSMatQh/yJ.'
-FAKE_USERS_DB = {
-    "user1": {
-        "username": "user1",
-        "full_name": "張三",
-        "hashed_password": "$2b$12$Ea.Rhv4jQ5suPb4XAGYfruj.6kXlHqNiyN1uGkCYgVvSMatQh/yJ.", # "pass123"
+# --- 模擬資料庫 ---
+# 在真實應用中，這裡應該是查詢資料庫
+# 確保密碼是使用 bcrypt 加密的
+# (範例密碼: "student123")
+fake_users_db = {
+    "s1": {
+        "username": "s1",
+        "full_name": "同學A",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
         "disabled": False,
     },
-    "user2": {
-        "username": "user2",
-        "full_name": "李四",
-        "hashed_password": "$2b$12$Ea.Rhv4jQ5suPb4XAGYfruj.6kXlHqNiyN1uGkCYgVvSMatQh/yJ.", # "pass123"
+    "s2": {
+        "username": "s2",
+        "full_name": "同學B",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
         "disabled": False,
     },
-    "manager": {
-        "username": "manager",
-        "full_name": "王經理",
-        "hashed_password": "$2b$12$Ea.Rhv4jQ5suPb4XAGYfruj.6kXlHqNiyN1uGkCYgVvSMatQh/yJ.", # "pass123"
+    "s3": {
+        "username": "s3",
+        "full_name": "同學C",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
         "disabled": False,
-    }
+    },
+    "s4": {
+        "username": "s4",
+        "full_name": "同學D",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+        "disabled": False,
+    },
+    "s5": {
+        "username": "s5",
+        "full_name": "同學E",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+        "disabled": False,
+    },
 }
 
-# --- 認證輔助函式 ---
+# --- 輔助函式 ---
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
@@ -169,13 +250,14 @@ def get_user(db, username: str):
 def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] = None):
     to_encode = data.copy()
     if expires_delta:
-        expire = datetime.datetime.utcnow() + expires_delta
+        expire = datetime.datetime.now(datetime.timezone.utc) + expires_delta
     else:
-        expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=15)
+        expire = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=15)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+# --- 依賴項：獲取當前使用者 ---
 async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -185,252 +267,214 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        full_name: str = payload.get("full_name")
-        if username is None or full_name is None:
+        if username is None:
             raise credentials_exception
-        token_data = TokenData(username=username, full_name=full_name)
+        token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
     
-    user = get_user(FAKE_USERS_DB, username=token_data.username)
+    user = get_user(fake_users_db, username=token_data.username)
     if user is None:
         raise credentials_exception
-    return user # 回傳 UserInDB 物件，包含 full_name
+    return user
 
-# =======================================================================
-# API 端點 (Endpoints)
-# =======================================================================
+async def get_current_active_user(
+    current_user: Annotated[User, Depends(get_current_user)]
+):
+    if current_user.disabled:
+        raise HTTPException(status_code=400, detail="帳號已被停用")
+    return current_user
 
-# --- 1. 服務靜態 HTML 檔案 ---
-
-@app.get("/", include_in_schema=False)
-async def read_index():
-    """服務 index.html 任務系統前端"""
-    return FileResponse('index.html')
-
-@app.get("/repair", include_in_schema=False)
-async def read_repair_form():
-    """服務 repair_form.html 報修表單前端"""
-    return FileResponse('repair_form.html')
-
-# --- 2. 報修提交 (來自 repair_form.html) ---
-
-class RepairRequest(BaseModel):
-    reporterName: str
-    deviceLocation: str
-    problemDescription: str
-    helperTeacher: Optional[str] = None # 保持這個欄位彈性
-
-@app.post("/submit-repair")
-async def submit_repair(request: RepairRequest, current_sheet: Annotated[gspread.Worksheet, Depends(get_sheet)]):
-    """
-    接收來自 repair_form.html 的報修請求並寫入 Google Sheet。
-    """
-    try:
-        # 獲取當前的 UTC 時間並轉換為台灣時區
-        utc_now = datetime.datetime.utcnow()
-        taiwan_time = utc_now + datetime.timedelta(hours=8)
-        timestamp = taiwan_time.strftime("%Y-%m-%d %H:%M:%S")
-
-        # 根據你 Flask app 的邏輯 (看起來是 5 欄)：
-        row = [
-            timestamp,
-            request.reporterName,
-            request.deviceLocation,
-            request.problemDescription,
-            "待處理" # E 欄：狀態
-        ]
-        
-        # 你的 Flask app 似乎有 5 個欄位。
-        # 如果你的 G-Sheet 有 協辦老師 欄位 (例如 F 欄)，你需要把它加回來
-        # row = [
-        #     timestamp,
-        #     request.reporterName,
-        #     request.deviceLocation,
-        #     request.problemDescription,
-        #     "待處理", # E 欄：狀態
-        #     request.helperTeacher or "" # F 欄：協辦老師
-        # ]
-        
-        current_sheet.append_row(row)
-        logging.info(f"資料成功寫入：{row}")
-        
-        return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content={"status": "success", "message": "報修單已成功提交！"}
-        )
-        
-    except Exception as e:
-        logging.error(f"寫入 Google Sheet 時發生錯誤: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"伺服器內部錯誤，無法寫入 Google Sheet: {e}"
-        )
-
-# --- 3. 認證 (來自 index.html) ---
-
+# --- 登入 API ---
 @app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
-    """
-    提供帳號密碼以獲取 Access Token (JWT)。
-    """
-    user = get_user(FAKE_USERS_DB, form_data.username)
+async def login_for_access_token(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+):
+    user = get_user(fake_users_db, form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="不正確的使用者名稱或密碼",
+            detail="不正確的帳號或密碼",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if user.disabled:
-        raise HTTPException(status_code=400, detail="使用者帳號已停用")
-
+    
     access_token_expires = datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        # 我們將 username 和 full_name 都存入 token
-        data={"sub": user.username, "full_name": user.full_name}, 
-        expires_delta=access_token_expires
+        data={"sub": user.username}, expires_delta=access_token_expires
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-# --- 4. 任務系統 API (來自 index.html) ---
 
-class Task(BaseModel):
-    row_number: int
-    timestamp: str
-    reporter: str
-    location: str
-    description: str
-    status: str
-    required_count: int
-    current_count: int
-    assignees: List[str]
+# =======================================================================
+# 4. 任務系統 API (需要認證)
+# =======================================================================
 
-@app.get("/tasks", response_model=List[Task])
-async def get_tasks(
-    current_sheet: Annotated[gspread.Worksheet, Depends(get_sheet)],
-    current_user: Annotated[User, Depends(get_current_user)] # 確保使用者已登入
+# ！！！ 新增的 API 端點 ！！！
+@app.get("/users/me", response_model=User)
+async def read_users_me(
+    current_user: Annotated[User, Depends(get_current_active_user)]
 ):
     """
-    獲取所有狀態為「待處理」的任務列表。
+    獲取當前已認證使用者的詳細資訊 (用於前端顯示 "你好, ...")
+    """
+    return current_user
+# ！！！ 以上是新增的程式碼 ！！！
+
+
+class Task(BaseModel):
+    row_number: int       # 工作表中的行號 (用於更新)
+    timestamp: str        # A 欄
+    reporter: str         # B 欄
+    location: str         # C 欄
+    description: str      # D 欄
+    status: str           # E 欄
+    required_count: int   # F 欄
+    current_count: int    # G-K 欄位計算
+    assignees: List[str]  # G-K 欄位
+
+class TakeTaskRequest(BaseModel):
+    row_number: int
+
+# --- 讀取任務列表 ---
+@app.get("/tasks", response_model=List[Task])
+async def get_tasks(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_sheet: gspread.Worksheet = Depends(get_sheet)
+):
+    """
+    獲取所有狀態為 "待處理" 的任務列表
     """
     try:
-        # 獲取所有資料 (包含標頭)
-        all_data = current_sheet.get_all_records()
+        all_data = current_sheet.get_all_values()
         tasks = []
         
-        # 欄位名稱 (假設)
-        # A: 時間戳, B: 報修人, C: 地點, D: 問題描述, E: 狀態, F: 負責人數, G: 負責人1, H: 負責人2...
-        
-        for index, row in enumerate(all_data):
-            row_number = index + 2 # +1 (index 轉行號), +1 (跳過標頭)
-            status_val = str(row.get("狀態", "")).strip()
+        if not all_data:
+            return []
             
-            if status_val == "待處理":
-                # 獲取負責人數
+        header = all_data[0]
+        # 欄位 G 到 K (索引 6 到 10) 是處理人員
+        assignee_cols_indices = list(range(6, 11)) # 索引 G(6), H(7), I(8), J(9), K(10)
+
+        # 從第二行開始 (索引 1)
+        for i, row in enumerate(all_data[1:]):
+            row_number = i + 2 # Google Sheet 行號是 1-based，且跳過標題行
+            
+            # 確保行資料足夠長
+            if len(row) < 6: # 至少要有 A-F 欄
+                continue
+
+            status = row[4].strip() # E 欄 (狀態)
+            
+            # 我們只關心 "待處理" 的任務
+            if status == "待處理":
                 try:
-                    required_count_str = str(row.get("負責人數", 0)).strip()
-                    if required_count_str:
-                        required_count = int(required_count_str)
-                    else:
-                        required_count = 0 # 如果 F 欄是空字串
-                except (ValueError, TypeError):
-                    required_count = 0 # 如果 F 欄不是數字，當作 0
+                    required_count_str = row[5].strip() # F 欄 (所需人數)
+                    required_count = int(required_count_str) if required_count_str.isdigit() else 1
+                except ValueError:
+                    required_count = 1
                 
-                # 收集 G 欄之後的負責人
                 assignees = []
-                # 假設 G~K 欄 (5人)
-                for i in range(1, 6): # 負責人1 到 負責人5
-                    assignee_name = str(row.get(f"負責人{i}", "")).strip()
-                    if assignee_name:
-                        assignees.append(assignee_name)
+                for col_index in assignee_cols_indices:
+                    if col_index < len(row) and row[col_index].strip():
+                        assignees.append(row[col_index].strip())
                 
-                tasks.append(Task(
+                current_count = len(assignees)
+                
+                # 檢查是否已滿員 (但狀態仍是待處理) -> 系統自我修復
+                if current_count >= required_count:
+                    current_sheet.update_cell(row_number, 5, "處理中") # 更新 E 欄
+                    status = "處理中"
+                    # 不在列表顯示
+                    continue
+                
+                # 檢查當前使用者是否已在列表中
+                if current_user.full_name in assignees:
+                    # 使用者已經接取此任務，不在列表顯示
+                    continue
+
+                task = Task(
                     row_number=row_number,
-                    timestamp=str(row.get("時間戳", "N/A")),
-                    reporter=str(row.get("報修人", "N/A")),
-                    location=str(row.get("地點", "N/A")),
-                    description=str(row.get("問題描述", "N/A")),
-                    status=status_val,
+                    timestamp=row[0],
+                    reporter=row[1],
+                    location=row[2],
+                    description=row[3],
+                    status=status,
                     required_count=required_count,
-                    current_count=len(assignees),
+                    current_count=current_count,
                     assignees=assignees
-                ))
+                )
+                tasks.append(task)
                 
         return tasks
 
+    except gspread.exceptions.APIError as e:
+        logging.error(f"Gspread API 錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"Google Sheets API 錯誤: {e.s}")
     except Exception as e:
-        logging.error(f"讀取任務列表時發生錯誤: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"讀取 Google Sheet 失敗: {e}"
-        )
+        logging.error(f"獲取任務時發生未知錯誤: {e}")
+        raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
 
-@app.post("/accept-task/{row_number}", response_model=Task)
-async def accept_task(
-    row_number: int,
-    current_sheet: Annotated[gspread.Worksheet, Depends(get_sheet)],
-    current_user: Annotated[UserInDB, Depends(get_current_user)] # 我們需要 user.full_name
+
+# --- 接取任務 ---
+@app.post("/take_task", response_model=Task)
+async def take_task(
+    request: TakeTaskRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    current_sheet: gspread.Worksheet = Depends(get_sheet)
 ):
     """
-    接取一個任務，將使用者名稱填入 G, H, I, J, K... 欄位。
+    允許使用者接取一個 "待處理" 的任務
     """
+    row_number = request.row_number
+    
     try:
-        # 1. 讀取指定行的資料 (G:K 欄位是 7~11)
-        # 欄位索引：A=1, B=2, C=3, D=4, E=5, F=6, G=7, H=8, I=9, J=10, K=11
+        # 1. 獲取該行的最新資料
         row_data = current_sheet.row_values(row_number)
         
-        # 基本檢查
-        if not row_data or len(row_data) < 6: # 至少要有 F 欄
-             raise HTTPException(status_code=404, detail="找不到該任務或欄位資料不完整。")
+        if not row_data:
+            raise HTTPException(status_code=404, detail="找不到該任務 (行號錯誤)")
+            
+        # 2. 檢查任務狀態
+        status = row_data[4].strip()
+        if status != "待處理":
+            raise HTTPException(status_code=400, detail=f"此任務狀態為 '{status}'，無法接取。")
 
-        task_status = row_data[4].strip() # E 欄 (索引 4)
-        
-        if task_status != "待處理":
-            raise HTTPException(status_code=400, detail=f"此任務狀態為「{task_status}」，無法接取。")
-
-        # 2. 檢查 F 欄 (負責人數)
-        try:
-            required_count_str = row_data[5].strip() # F 欄 (索引 5)
-            if required_count_str:
-                required_count = int(required_count_str)
-            else:
-                required_count = 0
-        except (ValueError, TypeError, IndexError):
-            required_count = 0 # 如果 F 欄空白或不是數字
-        
-        if required_count <= 0:
-            raise HTTPException(status_code=400, detail="此任務未設定負責人數(F欄)，無法接取。")
-
-        # 3. 檢查 G~K 欄 (索引 6 到 10) 的現有負責人
+        # 3. 獲取處理人員欄位 (G-K, 索引 6-10)
+        assignee_cols_indices = list(range(6, 11)) # G(6), H(7), I(8), J(9), K(10)
         assignees = []
-        first_empty_col_index = -1
+        first_empty_col = -1
         
-        # 我們只檢查 G 到 K (最多 5 人)
-        for i in range(6, 11): # 欄位索引 6(G) 到 10(K)
-            assignee_name = ""
-            if i < len(row_data):
-                assignee_name = row_data[i].strip()
-            
-            if assignee_name:
-                # 檢查是否已接取
-                if assignee_name == current_user.full_name:
-                    raise HTTPException(status_code=400, detail="你已經接取過此任務。")
-                assignees.append(assignee_name)
-            elif first_empty_col_index == -1:
-                # 
-                first_empty_col_index = i
+        for col_index in assignee_cols_indices:
+            if col_index < len(row_data):
+                assignee_name = row_data[col_index].strip()
+                if assignee_name:
+                    # 檢查是否重複接取
+                    if assignee_name == current_user.full_name:
+                        raise HTTPException(status_code=400, detail="您已經接取過此任務。")
+                    assignees.append(assignee_name)
+                elif first_empty_col == -1:
+                    first_empty_col = col_index
+            elif first_empty_col == -1: # 如果行資料不夠長
+                 first_empty_col = col_index
+        
+        # 4. 檢查是否已滿員
+        try:
+            required_count_str = row_data[5].strip() # F 欄
+            required_count = int(required_count_str) if required_count_str.isdigit() else 1
+        except ValueError:
+            required_count = 1
 
-        # 4. 判斷是否額滿
         if len(assignees) >= required_count:
-            raise HTTPException(status_code=400, detail="此任務已額滿，無法接取。")
-            
-        if first_empty_col_index == -1:
-            # 如果 G-K 都滿了 (5人)，但所需人數 > 5，這裡會出錯
-            # 這是 G-K 欄位限制，暫時先這樣
-             raise HTTPException(status_code=400, detail="此任務已滿 (已達 5 人上限)。")
+            # 狀態應為 "處理中"，但 gspread 快取可能延遲
+            current_sheet.update_cell(row_number, 5, "處理中") # 更新 E 欄
+            raise HTTPException(status_code=400, detail="此任務剛剛已額滿。")
 
-        # 5. 執行更新 (寫入 G/H/I... 欄)
-        # gspread 的 cell 索引是 (row, col)，從 1 開始
-        target_col = first_empty_col_index + 1 # 轉換為 1-based 索引
+        # 5. 將使用者名稱填入第一個空格
+        if first_empty_col == -1:
+             # 理論上不會發生，因為上一步已檢查滿員
+             raise HTTPException(status_code=500, detail="找不到可填入的欄位，但任務未滿員。")
+
+        target_col = first_empty_col + 1 # 轉換為 1-based 索引
         current_sheet.update_cell(row_number, target_col, current_user.full_name)
         
         # 6. 檢查是否因為這次加入而額滿，如果是，更新 E 欄狀態
@@ -462,12 +506,19 @@ async def accept_task(
         raise HTTPException(status_code=500, detail=f"伺服器內部錯誤: {e}")
 
 # =======================================================================
-# Uvicorn 啟動點 (如果直接執行此檔案)
+# Uvicorn/Gunicorn 啟動設定
 # =======================================================================
 if __name__ == "__main__":
     import uvicorn
-    # 檢查 PORT 環境變數，這是 Render 需要的
-    port = int(os.environ.get("PORT", 8000))
-    # 監聽 0.0.0.0 才能在容器外被訪問
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
-
+    # 本地開發時使用
+    uvicorn.run(
+        "main:app", 
+        host="127.0.0.1", 
+        port=8000, 
+        reload=True
+    )
+else:
+    # 當使用 Gunicorn 部署時 (例如在 Render 上)
+    # Gunicorn 會需要這個來指定工作者類別
+    # 指令: gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker
+    pass
