@@ -132,7 +132,7 @@ async def submit_report(report: Report, current_sheet: gspread.Worksheet = Depen
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "a_very_secret_key_that_should_be_changed")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8 # 8 小時
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 8 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -152,38 +152,49 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     username: Optional[str] = None
 
+# --- 模擬資料庫 (已加上註解) ---
+# 這裡是您應用程式的「使用者資料庫」。
+# 警告：這只適用於範例。在真實產品中，您應該使用真實的資料庫（例如 PostgreSQL, MySQL）。
+#
+# 關於密碼：
+# "hashed_password" 欄位中儲存的是「雜湊」過的密碼，而不是原始密碼。
+# 這是基於安全的考量。
+#
+# 這組雜湊值 ("$2b$12$E.Gq...") 對應的原始密碼是： "student123"
+#
 fake_users_db = {
-    "s1": {
-        "username": "s1",
-        "full_name": "同學A",
-        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+    "s1": { # 這是第一位使用者
+        "username": "s1", # 登入時使用的「帳號」
+        "full_name": "同學A", # 登入後，畫面上顯示的「全名」
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q", # "student123" 的 bcrypt 雜湊值
+        "disabled": False, # 帳號是否被停用
+    },
+    "s2": { # 這是第二位使用者
+        "username": "s2", # 登入時使用的「帳號」
+        "full_name": "同學B", # 登入後，畫面上顯示的「全名」
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q", # "student123" 的 bcrypt 雜湊值
         "disabled": False,
     },
-    "s2": {
-        "username": "s2",
-        "full_name": "同學B",
-        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
-        "disabled": False,
-    },
-    "s3": {
+    "s3": { # 這是第三位使用者
         "username": "s3",
         "full_name": "同學C",
-        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q", # "student123" 的 bcrypt 雜湊值
         "disabled": False,
     },
-    "s4": {
+    "s4": { # 這是第四位使用者
         "username": "s4",
         "full_name": "同學D",
-        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q", # "student123" 的 bcrypt 雜湊值
         "disabled": False,
     },
-    "s5": {
+    "s5": { # 這是第五位使用者
         "username": "s5",
         "full_name": "同學E",
-        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q",
+        "hashed_password": "$2b$12$E.Gq9mXbNKYGvPId.UpiyeaS2j0NlI.IuCUlYxM2P62M1n/PV5y.q", # "student123" 的 bcrypt 雜湊值
         "disabled": False,
     },
 }
+# --- 註解結束 ---
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
