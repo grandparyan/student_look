@@ -12,6 +12,6 @@ oauth2client
 python-jose
 cryptography
 # --- 修改這兩行 ---
-# passlib
-# bcrypt
-passlib[bcrypt] # <-- 修改為這一行，它會自動安裝相容的 bcrypt 版本
+passlib==1.7.4
+# bcrypt==4.3.0
+
