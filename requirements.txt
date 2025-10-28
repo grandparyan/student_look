@@ -4,15 +4,22 @@ type: web
 name: task-board-server # 您可以自訂服務名稱
 env: python # 指定環境為 Python
 pythonVersion: "3.10" # 指定 Python 版本
+fastapi
+uvicorn[standard]
+python-multipart
 
 這個專案很單純，沒有外部依賴
 
 buildCommand: "pip install -r requirements.txt" # 如果您有依賴，請取消註解
 
 startCommand: "python main.py" # 啟動伺服器的指令
+gspread
+oauth2client
 
 確保 Render 知道您的服務是 HTTP
 
 healthCheck:
 path: /
 initialDelaySeconds: 5
+python-jose[cryptography]
+passlib[bcrypt]
