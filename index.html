@@ -58,8 +58,8 @@
                     <p id="welcome-user" class="text-sm text-gray-600">載入中...</p>
                 </div>
                 <div>
-                    <button id="refresh-button" class_alias="mr-2" title="重新整理"
-                            class="p-2 rounded-full text-gray-600 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150">
+                    <button id="refresh-button" title="重新整理"
+                            class="mr-2 p-2 rounded-full text-gray-600 hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150">
                         <!-- 重新整理 SVG Icon -->
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                             <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101A7.002 7.002 0 0110 3c3.866 0 7 3.134 7 7s-3.134 7-7 7-7-3.134-7-7a1 1 0 011-1h2a1 1 0 011 1 3 3 0 003 3 3 3 0 003-3 1 1 0 112 0 5 5 0 01-5 5 5 5 0 01-5-5 1 1 0 011-1V3a1 1 0 01-1-1V2z" clip-rule="evenodd" />
@@ -199,7 +199,17 @@
                     if (response.status === 401) {
                         // Token 過期或無效
                         alert('您的登入已過期，請重新登入。');
-                        handleLogout();
+                        
+                        // --- 修正開始 ---
+                        // 之前: handleLogout(); (這是不存在的函式)
+                        // 現在: 執行登出按鈕的邏輯
+                        currentToken = null;
+                        currentUser = null;
+                        updateUI('login');
+                        taskList.innerHTML = ''; // 清空任務列表
+                        loginForm.reset();
+                        // --- 修正結束 ---
+                        
                         return;
                     }
                     if (!response.ok) {
@@ -336,3 +346,4 @@
     </script>
 </body>
 </html>
+
