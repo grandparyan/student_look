@@ -1,11 +1,13 @@
-FastAPI 相關
+# FastAPI 相關
 fastapi
 uvicorn[standard]
 python-multipart
-Google Sheets
+
+# Google Sheets
 gspread
 oauth2client
-認證相關 (拆開安裝以提高相容性)
+
+# 認證相關 (拆開安裝以提高相容性)
 python-jose
 cryptography
 passlib
