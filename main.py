@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+# from passlib.context import CryptContext # <-- 移除 passlib
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Annotated 
 
@@ -129,9 +129,10 @@ class User(BaseModel):
 
 class UserInDB(User):
     """
-    儲存在資料庫（或 Google Sheet）中的使用者模型，包含雜湊密碼。
+    儲存在資料庫（或 Google Sheet）中的使用者模型，包含明文密碼。
     """
-    hashed_password: str
+    # --- 修改：不再使用雜湊密碼 ---
+    password: str 
 
 # --- 2. 安全性與認證 (JWT) ---
 
@@ -140,8 +141,8 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "your-fallback-secret-key-for-developm
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 # Token 效期 30 分鐘
 
-# 密碼雜湊
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- 移除密碼雜湊 ---
+# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 密碼流程
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -151,17 +152,10 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # --- 3. 認證輔助函式 ---
 
-def verify_password(plain_password, hashed_password):
-    """
-    驗證明文密碼是否與雜湊密碼相符。
-    """
-    try:
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception as e:
-        logging.error(f"密碼驗證時出錯: {e}")
-        return False
+# --- 移除 verify_password ---
+# (不再需要驗證雜湊)
 
-# --- 修改：從 Google Sheet 獲取使用者 ---
+# --- 修改：從 Google Sheet 獲取使用者 (使用明文密碼) ---
 def get_user_from_sheet(username: str) -> Optional[UserInDB]:
     """
     從 Google Sheet (使用者名單) 獲取使用者資料。
@@ -171,20 +165,21 @@ def get_user_from_sheet(username: str) -> Optional[UserInDB]:
         return None
     
     try:
-        # 假設工作表包含 '帳號', '雜湊密碼', '角色' 欄位
+        # 假設工作表包含 '帳號', '密碼', '角色' 欄位
         # get_all_records() 會將第一列作為鍵 (key)
         all_users = user_worksheet.get_all_records()
         
         for user_data in all_users:
             if user_data.get('帳號') == username:
                 # 確保必要欄位存在
-                if '雜湊密碼' not in user_data or '角色' not in user_data:
-                    logging.warning(f"使用者 '{username}' 在 Sheet 中資料不完整（缺少 '雜湊密碼' 或 '角色'）。")
+                # --- 修改：檢查 '密碼' 而不是 '雜湊密碼' ---
+                if '密碼' not in user_data or '角色' not in user_data:
+                    logging.warning(f"使用者 '{username}' 在 Sheet 中資料不完整（缺少 '密碼' 或 '角色'）。")
                     continue
                     
                 return UserInDB(
                     username=user_data.get('帳號'),
-                    hashed_password=user_data.get('雜湊密碼'),
+                    password=user_data.get('密碼'), # <-- 直接獲取明文密碼
                     role=user_data.get('角色')
                 )
         
@@ -246,11 +241,12 @@ async def login_for_access_token(
     """
     使用者登入端點，驗證成功後返回 access token。
     """
-    # --- 修改：使用 get_user_from_sheet ---
+    # --- 修改：使用 get_user_from_sheet (明文密碼) ---
     user = get_user_from_sheet(form_data.username)
     
     # 檢查使用者是否存在，以及密碼是否正確
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    # --- 修改：直接比對明文密碼 ---
+    if not user or form_data.password != user.password:
         logging.warning(f"登入失敗: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -318,11 +314,17 @@ async def get_tasks(
             idx_assign = header_map['指派人員']
         except KeyError as e:
             logging.error(f"工作表缺少必要欄位: {e}")
-            raise HTTPException(status_code=500, detail=f"Google Sheet 欄位缺失: {e}")
+            raise HTTPException(status_code=5.00, detail=f"Google Sheet 欄位缺失: {e}")
 
         # 遍歷每一行資料 (row_index 從 2 開始，因為 1 是標頭)
         for i, row_data in enumerate(records):
             row_id = i + 2 # Google Sheet 的行號 (1-based index)
+            
+            # 安全性檢查：確保 row_data 夠長
+            if len(row_data) <= idx_status:
+                logging.warning(f"第 {row_id} 行資料不完整，跳過。")
+                continue
+
             status = row_data[idx_status].strip()
 
             # 只顯示「待處理」或「處理中」的任務
@@ -330,29 +332,33 @@ async def get_tasks(
                 
                 # 解析需求人數
                 try:
-                    required_count = int(row_data[idx_req])
+                    required_count_str = row_data[idx_req] if len(row_data) > idx_req else "1"
+                    required_count = int(required_count_str) if required_count_str else 1
                 except (ValueError, IndexError):
                     required_count = 1 # 如果欄位為空或格式錯誤，預設為 1
 
                 # 解析指派人員
-                assignees_str = row_data[idx_assign]
+                assignees_str = row_data[idx_assign] if len(row_data) > idx_assign else ""
                 if assignees_str:
                     assignees = [name.strip() for name in assignees_str.split(',')]
                 else:
                     assignees = []
                 
-                # 確保所有欄位都存在
-                task = Task(
-                    row_id=row_id,
-                    task_id=row_data[idx_id],
-                    location=row_data[idx_loc],
-                    description=row_data[idx_desc],
-                    status=status,
-                    required_count=required_count,
-                    current_count=len(assignees),
-                    assignees=assignees
-                )
-                tasks.append(task)
+                # 確保所有欄位都存在且在索引範圍內
+                if len(row_data) > max(idx_id, idx_loc, idx_desc):
+                    task = Task(
+                        row_id=row_id,
+                        task_id=row_data[idx_id],
+                        location=row_data[idx_loc],
+                        description=row_data[idx_desc],
+                        status=status,
+                        required_count=required_count,
+                        current_count=len(assignees),
+                        assignees=assignees
+                    )
+                    tasks.append(task)
+                else:
+                    logging.warning(f"第 {row_id} 行資料欄位不足，跳過。")
         
         return tasks
 
@@ -399,6 +405,11 @@ async def take_task(
         # 獲取特定行的資料
         row_data = worksheet.row_values(row_id)
         
+        # 安全性檢查：確保 row_data 夠長
+        if len(row_data) <= max(col_idx_status - 1, col_idx_assignees - 1, col_idx_required - 1):
+            logging.error(f"嘗試接取任務失敗：第 {row_id} 行資料不完整。")
+            raise HTTPException(status_code=404, detail=f"找不到行號為 {row_id} 的任務資料。")
+
         current_status = row_data[col_idx_status - 1].strip()
         assignees_str = row_data[col_idx_assignees - 1]
         required_str = row_data[col_idx_required - 1]
@@ -410,7 +421,7 @@ async def take_task(
             assignees = []
         
         try:
-            required_count = int(required_str)
+            required_count = int(required_str) if required_str else 1
         except (ValueError, IndexError):
             required_count = 1 # 預設為 1
 
@@ -480,3 +491,4 @@ async def read_root():
             content={"error": "讀取介面檔案時發生伺服器內部錯誤。"},
             status_code=500
         )
+
