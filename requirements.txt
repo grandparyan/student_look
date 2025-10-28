@@ -13,5 +13,4 @@ python-jose
 cryptography
 # --- 修改這兩行 ---
 passlib==1.7.4
-# bcrypt==4.3.0
-
+bcrypt==4.3.0
