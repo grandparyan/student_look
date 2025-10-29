@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from jose import JWTError, jwt
-# from passlib.context import CryptContext # <-- 移除 passlib
+from passlib.context import CryptContext # <-- 恢復 import
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from typing import Annotated 
 
@@ -38,7 +38,7 @@ app.add_middleware(
 # --- Google Sheets 設定 ---
 spreadsheet_id = "1IHyA7aRxGJekm31KIbuORpg4-dVY8XTOEbU6p8vK3y4"
 WORKSHEET_NAME = "設備報修"
-USER_WORKSHEET_NAME = "使用者名單" # <-- 新增：使用者工作表名稱
+# USER_WORKSHEET_NAME = "使用者名單" # <-- 移除
 
 scope = [
     "https://spreadsheets.google.com/feeds",
@@ -57,7 +57,7 @@ if not creds_json_str:
     client = None
     spreadsheet = None
     worksheet = None
-    user_worksheet = None # <-- 新增
+    # user_worksheet = None # <-- 移除
 else:
     try:
         creds_json = json.loads(creds_json_str)
@@ -75,29 +75,20 @@ else:
             logging.error(f"載入 {WORKSHEET_NAME} 工作表時出錯: {e}")
             worksheet = None
 
-        # --- 新增：載入 "使用者名單" 工作表 ---
-        try:
-            user_worksheet = spreadsheet.worksheet(USER_WORKSHEET_NAME)
-        except gspread.WorksheetNotFound:
-            logging.error(f"找不到工作表：{USER_WORKSHEET_NAME}。")
-            user_worksheet = None
-        except Exception as e:
-            logging.error(f"載入 {USER_WORKSHEET_NAME} 工作表時出錯: {e}")
-            user_worksheet = None
-        # --- 結束新增 ---
+        # --- 移除：載入 "使用者名單" 工作表 ---
 
     except json.JSONDecodeError:
         logging.error("錯誤：'GOOGLE_CREDENTIALS_JSON' 環境變數不是有效的 JSON。")
         client = None
         spreadsheet = None
         worksheet = None
-        user_worksheet = None # <-- 新增
+        # user_worksheet = None # <-- 移除
     except Exception as e:
         logging.error(f"Google Sheets 初始化失敗: {e}")
         client = None
         spreadsheet = None
         worksheet = None
-        user_worksheet = None # <-- 新增
+        # user_worksheet = None # <-- 移除
 
 # --- 1. Pydantic 資料模型 ---
 
@@ -131,8 +122,8 @@ class UserInDB(User):
     """
     儲存在資料庫（或 Google Sheet）中的使用者模型，包含明文密碼。
     """
-    # --- 修改：不再使用雜湊密碼 ---
-    password: str 
+    # --- 修改：改回使用雜湊密碼 ---
+    hashed_password: str 
 
 # --- 2. 安全性與認證 (JWT) ---
 
@@ -141,55 +132,68 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "your-fallback-secret-key-for-developm
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30 # Token 效期 30 分鐘
 
-# --- 移除密碼雜湊 ---
-# pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- 恢復密碼雜湊 ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # OAuth2 密碼流程
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-# --- 移除 fake_users_db ---
-# (假資料庫已被移除)
+# --- 恢復 fake_users_db ---
+# --- 假資料庫 (用於演示) ---
+# 在實際應用中，這應該來自您的資料庫
+fake_users_db = {
+    "studentA": {
+        "username": "studentA",
+        "full_name": "學生 A",
+        "hashed_password": pwd_context.hash("passA"), # 範例密碼
+        "role": "student",
+        "disabled": False
+    },
+    "studentB": {
+        "username": "studentB",
+        "full_name": "學生 B",
+        "hashed_password": pwd_context.hash("passB"), # 範例密碼
+        "role": "student",
+        "disabled": False
+    },
+    "staffC": {
+        "username": "staffC",
+        "full_name": "職員 C (維修人員)",
+        "hashed_password": pwd_context.hash("passC"), # 範例密碼
+        "role": "staff",
+        "disabled": False
+    }
+}
+
 
 # --- 3. 認證輔助函式 ---
 
-# --- 移除 verify_password ---
-# (不再需要驗證雜湊)
-
-# --- 修改：從 Google Sheet 獲取使用者 (使用明文密碼) ---
-def get_user_from_sheet(username: str) -> Optional[UserInDB]:
+# --- 恢復 verify_password ---
+def verify_password(plain_password, hashed_password):
     """
-    從 Google Sheet (使用者名單) 獲取使用者資料。
+    驗證明文密碼是否與雜湊密碼相符。
     """
-    if user_worksheet is None:
-        logging.error("使用者工作表 'user_worksheet' 未被正確初始化。")
-        return None
-    
     try:
-        # 假設工作表包含 '帳號', '密碼', '角色' 欄位
-        # get_all_records() 會將第一列作為鍵 (key)
-        all_users = user_worksheet.get_all_records()
-        
-        for user_data in all_users:
-            if user_data.get('帳號') == username:
-                # 確保必要欄位存在
-                # --- 修改：檢查 '密碼' 而不是 '雜湊密碼' ---
-                if '密碼' not in user_data or '角色' not in user_data:
-                    logging.warning(f"使用者 '{username}' 在 Sheet 中資料不完整（缺少 '密碼' 或 '角色'）。")
-                    continue
-                    
-                return UserInDB(
-                    username=user_data.get('帳號'),
-                    password=user_data.get('密碼'), # <-- 直接獲取明文密碼
-                    role=user_data.get('角色')
-                )
-        
-        # 找不到使用者
-        logging.info(f"在 Sheet 中找不到使用者: {username}")
-        return None
-    
+        return pwd_context.verify(plain_password, hashed_password)
     except Exception as e:
-        logging.error(f"從 Google Sheet 獲取使用者 '{username}' 時出錯: {e}", exc_info=True)
-        return None
+        logging.error(f"密碼驗證時出錯: {e}")
+        return False
+
+# --- 修改：從假資料庫獲取使用者 ---
+def get_user_from_db(username: str) -> Optional[UserInDB]:
+    """
+    從假資料庫 (fake_users_db) 獲取使用者資料。
+    """
+    user_data = fake_users_db.get(username)
+    if user_data:
+        # 轉換為 UserInDB 模型
+        return UserInDB(
+            username=user_data.get("username"),
+            hashed_password=user_data.get("hashed_password"),
+            role=user_data.get("role")
+        )
+    logging.info(f"在 fake_users_db 中找不到使用者: {username}")
+    return None
 # --- 結束修改 ---
 
 
@@ -223,8 +227,8 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
     except JWTError:
         raise credentials_exception
     
-    # --- 修改：使用 get_user_from_sheet ---
-    user_data = get_user_from_sheet(username=username)
+    # --- 修改：使用 get_user_from_db ---
+    user_data = get_user_from_db(username=username)
     if user_data is None:
         raise credentials_exception
     
@@ -241,12 +245,12 @@ async def login_for_access_token(
     """
     使用者登入端點，驗證成功後返回 access token。
     """
-    # --- 修改：使用 get_user_from_sheet (明文密碼) ---
-    user = get_user_from_sheet(form_data.username)
+    # --- 修改：使用 get_user_from_db (雜湊密碼) ---
+    user = get_user_from_db(form_data.username)
     
     # 檢查使用者是否存在，以及密碼是否正確
-    # --- 修改：直接比對明文密碼 ---
-    if not user or form_data.password != user.password:
+    # --- 修改：使用 verify_password ---
+    if not user or not verify_password(form_data.password, user.hashed_password):
         logging.warning(f"登入失敗: {form_data.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -314,7 +318,7 @@ async def get_tasks(
             idx_assign = header_map['指派人員']
         except KeyError as e:
             logging.error(f"工作表缺少必要欄位: {e}")
-            raise HTTPException(status_code=5.00, detail=f"Google Sheet 欄位缺失: {e}")
+            raise HTTPException(status_code=500, detail=f"Google Sheet 欄位缺失: {e}")
 
         # 遍歷每一行資料 (row_index 從 2 開始，因為 1 是標頭)
         for i, row_data in enumerate(records):
@@ -450,7 +454,7 @@ async def take_task(
         worksheet.update_cell(row_id, col_idx_status, new_status)
         worksheet.update_cell(row_id, col_idx_assignees, new_assignees_str)
         
-        logging.info(f"使用者 {username} 成功接取任務 (Row {row_id})。")
+        logging.info(f"使用者 {username} G_ACC 成功接取任務 (Row {row_id})。")
 
         # 6. 返回更新後的任務狀態
         return {
